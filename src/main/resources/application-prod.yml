@@ -1,0 +1,69 @@
+# ============================================
+# Production Configuration for Railway/Render
+# ============================================
+
+server:
+  port: ${PORT:8091}  # Railway는 PORT 환경변수 사용
+
+spring:
+  application:
+    name: order-collector-service
+  
+  # 프로덕션 데이터베이스 (Railway PostgreSQL)
+  datasource:
+    url: ${DATABASE_URL}  # Railway가 자동으로 제공
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5  # 무료 플랜은 연결 수 제한
+      minimum-idle: 2
+      connection-timeout: 20000
+  
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: update  # 프로덕션에서는 validate 권장, 지금은 update
+    show-sql: false  # 프로덕션에서는 false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+  
+  # JSON 설정
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: Asia/Seoul
+    default-property-inclusion: non_null
+
+# Actuator 설정 (Health check)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+# 로깅 설정 (프로덕션)
+logging:
+  level:
+    root: INFO
+    com.oms.collector: INFO
+    org.springframework.web: WARN
+    org.hibernate: WARN
+
+# 주문 수집 설정
+collector:
+  schedule:
+    enabled: ${SCHEDULER_ENABLED:true}  # 환경변수로 제어
+    interval: 600000  # 10분
+    initial-delay: 60000  # 1분
+  retry:
+    max-attempts: 3
+    delay: 5000

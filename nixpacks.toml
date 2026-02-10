@@ -1,0 +1,9 @@
+# Railway Nixpacks 설정
+[phases.setup]
+nixPkgs = ["openjdk17"]
+
+[phases.build]
+cmds = ["./gradlew clean build -x test --no-daemon"]
+
+[start]
+cmd = "java -jar -Dspring.profiles.active=prod build/libs/*.jar"
