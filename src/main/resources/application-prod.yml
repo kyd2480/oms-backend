@@ -11,9 +11,9 @@ spring:
   
   # 프로덕션 데이터베이스 (Railway PostgreSQL)
   datasource:
-    url: ${DATABASE_URL}  # Railway가 자동으로 제공
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    url: jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE:collector_db}
+    username: ${PGUSER:postgres}
+    password: ${PGPASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5  # 무료 플랜은 연결 수 제한
