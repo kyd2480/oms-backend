@@ -11,7 +11,7 @@ spring:
   
   # 프로덕션 데이터베이스 (Railway PostgreSQL)
   datasource:
-    url: ${DATABASE_PUBLIC_URL:jdbc:postgresql://localhost:5432/railway}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/railway}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5  # 무료 플랜은 연결 수 제한
