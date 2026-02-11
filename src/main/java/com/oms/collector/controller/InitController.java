@@ -39,39 +39,43 @@ public class InitController {
                     salesChannelRepository.count()));
         }
         
+        LocalDateTime now = LocalDateTime.now();
         List<SalesChannel> channels = new ArrayList<>();
         
         // 네이버 스마트스토어
-        SalesChannel naver = new SalesChannel();
-        naver.setChannelId(UUID.randomUUID());
-        naver.setChannelCode("NAVER");
-        naver.setChannelName("네이버 스마트스토어");
-        naver.setApiType("REST");
-        naver.setActive(true);
-        naver.setCreatedAt(LocalDateTime.now());
-        naver.setUpdatedAt(LocalDateTime.now());
+        SalesChannel naver = SalesChannel.builder()
+            .channelId(UUID.randomUUID())
+            .channelCode("NAVER")
+            .channelName("네이버 스마트스토어")
+            .apiType("REST")
+            .isActive(true)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
         channels.add(naver);
         
         // 쿠팡
-        SalesChannel coupang = new SalesChannel();
-        coupang.setChannelId(UUID.randomUUID());
-        coupang.setChannelCode("COUPANG");
-        coupang.setChannelName("쿠팡");
-        coupang.setApiType("REST");
-        coupang.setActive(true);
-        coupang.setCreatedAt(LocalDateTime.now());
-        coupang.setUpdatedAt(LocalDateTime.now());
+        SalesChannel coupang = SalesChannel.builder()
+            .channelId(UUID.randomUUID())
+            .channelCode("COUPANG")
+            .channelName("쿠팡")
+            .apiType("REST")
+            .isActive(true)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
         channels.add(coupang);
         
         // 11번가
-        SalesChannel st11 = new SalesChannel();
-        st11.setChannelId(UUID.randomUUID());
-        st11.setChannelCode("11ST");
-        st11.setChannelName("11번가");
-        st11.setApiType("REST");
-        st11.setActive(true);
-        st11.setCreatedAt(LocalDateTime.now());
-        st11.setUpdatedAt(LocalDateTime.now());
+        SalesChannel st11 = SalesChannel.builder()
+            .channelId(UUID.randomUUID())
+            .channelCode("11ST")
+            .channelName("11번가")
+            .apiType("REST")
+            .isActive(true)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
         channels.add(st11);
         
         // 저장
