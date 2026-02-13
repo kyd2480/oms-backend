@@ -9,6 +9,13 @@ spring:
   application:
     name: order-collector-service
   
+  # 파일 업로드 설정
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+  
   # 데이터베이스 설정
   datasource:
     url: jdbc:postgresql://localhost:5437/collector_db

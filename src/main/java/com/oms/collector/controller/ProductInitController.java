@@ -33,14 +33,19 @@ public class ProductInitController {
      */
     @PostMapping("/products/upload-csv")
     public ResponseEntity<String> uploadCsvProducts(@RequestParam("file") MultipartFile file) {
-        log.info("📦 CSV 상품 업로드 시작: {}", file.getOriginalFilename());
+        log.info("📦 CSV 상품 업로드 시작");
+        log.info("   파일명: {}", file.getOriginalFilename());
+        log.info("   파일크기: {} bytes", file.getSize());
+        log.info("   Content-Type: {}", file.getContentType());
         
         if (file.isEmpty()) {
+            log.error("❌ 파일이 비어있습니다.");
             return ResponseEntity.badRequest().body("파일이 비어있습니다.");
         }
         
         try {
             List<Product> products = parseCsvFile(file);
+            log.info("✅ CSV 파싱 완료: {}개 상품", products.size());
             
             // 기존 상품과 비교하여 업데이트 또는 추가
             int newCount = 0;
@@ -48,7 +53,6 @@ public class ProductInitController {
             
             for (Product product : products) {
                 if (productRepository.existsBySku(product.getSku())) {
-                    // 기존 상품은 업데이트하지 않음 (재고는 입출고로만 관리)
                     updateCount++;
                 } else {
                     productRepository.save(product);
@@ -64,6 +68,8 @@ public class ProductInitController {
             
         } catch (Exception e) {
             log.error("❌ CSV 파싱 실패", e);
+            log.error("   에러 메시지: {}", e.getMessage());
+            log.error("   에러 타입: {}", e.getClass().getName());
             return ResponseEntity.badRequest().body("CSV 파싱 실패: " + e.getMessage());
         }
     }
