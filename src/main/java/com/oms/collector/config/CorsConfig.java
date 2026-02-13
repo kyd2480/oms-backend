@@ -35,6 +35,8 @@ public class CorsConfig {
         origins.add("http://localhost:3000");
         origins.add("http://127.0.0.1:5173");
         origins.add("http://127.0.0.1:3000");
+        origins.add("https://stately-bonbon-cc00cb.netlify.app"); // Netlify 프로덕션
+        origins.add("https://astately-bonbon-ed018a.netlify.app"); // 이전 Netlify (있다면)
         
         // 환경변수에서 추가 Origin 읽기
         if (allowedOrigins != null && !allowedOrigins.isEmpty()) {
