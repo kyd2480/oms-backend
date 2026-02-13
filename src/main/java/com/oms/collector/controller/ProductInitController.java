@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
@@ -32,7 +33,15 @@ public class ProductInitController {
      * CSV 파일 업로드로 상품 등록 (비동기 처리)
      */
     @PostMapping("/products/upload-csv")
-    public ResponseEntity<String> uploadCsvProducts(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<String> uploadCsvProducts(
+            @RequestParam("file") MultipartFile file,
+            HttpServletResponse response) {
+        
+        // CORS 헤더 직접 추가
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "*");
+        
         log.info("📦 CSV 상품 업로드 시작");
         log.info("   파일명: {}", file.getOriginalFilename());
         log.info("   파일크기: {} bytes", file.getSize());
