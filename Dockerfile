@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD sh -c "wget --no-verbose --tries=1 --spider http://localhost:${PORT:-8091}/actuator/health || exit 1"
 
 # 애플리케이션 실행
-ENTRYPOINT ["java", "-jar", "-Dspring.profiles.active=prod", "app.jar"]
+ENTRYPOINT ["java", "-Dspring.profiles.active=prod", "-jar", "app.jar"]
