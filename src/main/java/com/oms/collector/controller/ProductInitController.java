@@ -29,7 +29,7 @@ public class ProductInitController {
     private final ProductRepository productRepository;
     
     /**
-     * CSV 파일 업로드로 상품 등록
+     * CSV 파일 업로드로 상품 등록 (비동기 처리)
      */
     @PostMapping("/products/upload-csv")
     public ResponseEntity<String> uploadCsvProducts(@RequestParam("file") MultipartFile file) {
@@ -44,27 +44,45 @@ public class ProductInitController {
         }
         
         try {
+            // 파일 파싱만 먼저 해서 개수 확인
             List<Product> products = parseCsvFile(file);
-            log.info("✅ CSV 파싱 완료: {}개 상품", products.size());
+            int totalCount = products.size();
             
-            // 기존 상품과 비교하여 업데이트 또는 추가
-            int newCount = 0;
-            int updateCount = 0;
+            log.info("✅ CSV 파싱 완료: {}개 상품", totalCount);
             
-            for (Product product : products) {
-                if (productRepository.existsBySku(product.getSku())) {
-                    updateCount++;
-                } else {
-                    productRepository.save(product);
-                    newCount++;
+            // 즉시 응답 (비동기 저장은 백그라운드에서)
+            String message = String.format("CSV 파일 업로드 시작 - 총 %d개 상품 처리 중...", totalCount);
+            
+            // 비동기로 DB 저장 (별도 스레드)
+            new Thread(() -> {
+                try {
+                    int newCount = 0;
+                    int updateCount = 0;
+                    
+                    // 배치 처리 (100개씩)
+                    for (int i = 0; i < products.size(); i += 100) {
+                        int end = Math.min(i + 100, products.size());
+                        List<Product> batch = products.subList(i, end);
+                        
+                        for (Product product : batch) {
+                            if (productRepository.existsBySku(product.getSku())) {
+                                updateCount++;
+                            } else {
+                                productRepository.save(product);
+                                newCount++;
+                            }
+                        }
+                        
+                        log.info("진행률: {}/{} ({}%)", end, products.size(), (end * 100 / products.size()));
+                    }
+                    
+                    log.info("✅ CSV 저장 완료 - 신규: {}개, 기존: {}개, 총: {}개", newCount, updateCount, products.size());
+                } catch (Exception e) {
+                    log.error("❌ 백그라운드 저장 실패", e);
                 }
-            }
+            }).start();
             
-            String message = String.format("CSV 업로드 완료 - 신규: %d개, 기존: %d개, 총: %d개", 
-                newCount, updateCount, products.size());
-            
-            log.info("✅ " + message);
-            return ResponseEntity.ok(message);
+            return ResponseEntity.accepted().body(message);
             
         } catch (Exception e) {
             log.error("❌ CSV 파싱 실패", e);
