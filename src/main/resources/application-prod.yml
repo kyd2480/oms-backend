@@ -13,8 +13,9 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 50MB
-      max-request-size: 50MB
+      max-file-size: 100MB
+      max-request-size: 100MB
+      file-size-threshold: 10MB
   
   # 프로덕션 데이터베이스 (Railway PostgreSQL)
   datasource:
