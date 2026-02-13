@@ -23,6 +23,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/init")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
 public class ProductInitController {
     
     private final ProductRepository productRepository;
