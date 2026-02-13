@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,6 +29,18 @@ import java.util.List;
 public class ProductInitController {
     
     private final ProductRepository productRepository;
+    
+    /**
+     * CSV 업로드 OPTIONS 요청 처리 (CORS Preflight)
+     */
+    @RequestMapping(value = "/products/upload-csv", method = RequestMethod.OPTIONS)
+    public ResponseEntity<Void> uploadCsvOptions(HttpServletResponse response) {
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "*");
+        response.setHeader("Access-Control-Max-Age", "3600");
+        return ResponseEntity.ok().build();
+    }
     
     /**
      * CSV 파일 업로드로 상품 등록 (비동기 처리)
