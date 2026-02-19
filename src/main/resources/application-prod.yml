@@ -30,13 +30,14 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/railway}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5
-      minimum-idle: 2
-      connection-timeout: 30000      # 30초
-      idle-timeout: 600000           # 10분
-      max-lifetime: 1800000          # 30분
-      leak-detection-threshold: 60000  # 연결 누수 감지
+      maximum-pool-size: 10          # 풀 크기 증가
+      minimum-idle: 5                # 최소 유휴 연결
+      connection-timeout: 60000      # 연결 타임아웃 60초
+      idle-timeout: 600000           # 유휴 타임아웃 10분
+      max-lifetime: 1800000          # 최대 수명 30분
+      leak-detection-threshold: 120000  # 누수 감지 2분
       connection-test-query: "SELECT 1"
+      auto-commit: true              # 자동 커밋 활성화
   
   # JPA 설정
   jpa:
@@ -49,10 +50,14 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
-          batch_size: 50               # 배치 크기
-        order_inserts: true            # INSERT 순서 최적화
-        order_updates: true            # UPDATE 순서 최적화
-        generate_statistics: false      # 통계 생성 비활성화 (성능 향상)
+          batch_size: 100              # 배치 크기 증가
+          fetch_size: 100              # 페치 크기
+        order_inserts: true
+        order_updates: true
+        generate_statistics: false
+        cache:
+          use_second_level_cache: false  # 2차 캐시 비활성화
+          use_query_cache: false         # 쿼리 캐시 비활성화
     open-in-view: false
   
   # JSON 설정
