@@ -43,6 +43,23 @@ public class ProductInitController {
     }
     
     /**
+     * 전체 상품 삭제 (초기화)
+     */
+    @DeleteMapping("/products/all")
+    public ResponseEntity<String> deleteAllProducts() {
+        log.warn("🗑️ 전체 상품 삭제 요청");
+        
+        try {
+            productRepository.deleteAll();
+            log.info("✅ 전체 상품 삭제 완료");
+            return ResponseEntity.ok("전체 상품이 삭제되었습니다.");
+        } catch (Exception e) {
+            log.error("❌ 상품 삭제 실패", e);
+            return ResponseEntity.internalServerError().body("삭제 실패: " + e.getMessage());
+        }
+    }
+    
+    /**
      * CSV 파일 업로드로 상품 등록 (비동기 처리)
      */
     @PostMapping("/products/upload-csv")
@@ -140,15 +157,33 @@ public class ProductInitController {
                     
                     if (barcode.isEmpty() || productName.isEmpty()) continue;
                     
-                    // 재고는 창고별재고-1.본사(안양) 컬럼 (인덱스 8)
-                    int stock = 0;
+                    // 창고별 재고 파싱
+                    int anyangStock = 0;  // 창고별재고-1.본사(안양) - 인덱스 8
+                    int icheonStock = 0;  // 창고별재고-2.고백창고(이천) - 인덱스 9
+                    int bucheonStock = 0; // 창고별재고-3.부천검수창고 - 인덱스 10
+                    
+                    // 안양 재고
                     if (fields.length > 8 && !fields[8].isEmpty() && !fields[8].equals("=\"\"")) {
                         try {
-                            stock = Integer.parseInt(fields[8].replaceAll("\"", "").trim());
-                        } catch (NumberFormatException e) {
-                            // 재고 파싱 실패 시 0으로
-                        }
+                            anyangStock = Integer.parseInt(fields[8].replaceAll("\"", "").trim());
+                        } catch (NumberFormatException e) {}
                     }
+                    
+                    // 이천 재고
+                    if (fields.length > 9 && !fields[9].isEmpty() && !fields[9].equals("=\"\"")) {
+                        try {
+                            icheonStock = Integer.parseInt(fields[9].replaceAll("\"", "").trim());
+                        } catch (NumberFormatException e) {}
+                    }
+                    
+                    // 부천 재고
+                    if (fields.length > 10 && !fields[10].isEmpty() && !fields[10].equals("=\"\"")) {
+                        try {
+                            bucheonStock = Integer.parseInt(fields[10].replaceAll("\"", "").trim());
+                        } catch (NumberFormatException e) {}
+                    }
+                    
+                    int totalStock = anyangStock + icheonStock + bucheonStock;
                     
                     Product product = Product.builder()
                         .sku(barcode)
@@ -157,11 +192,14 @@ public class ProductInitController {
                         .category(fields.length > 46 ? fields[46].trim() : "")
                         .costPrice(BigDecimal.ZERO)
                         .sellingPrice(BigDecimal.ZERO)
-                        .totalStock(stock)
-                        .availableStock(stock)
+                        .totalStock(totalStock)
+                        .availableStock(totalStock)
                         .reservedStock(0)
                         .safetyStock(10)
                         .warehouseLocation(fields.length > 6 ? fields[6].replaceAll("=\"\"?", "").trim() : "")
+                        .warehouseStockAnyang(anyangStock)
+                        .warehouseStockIcheon(icheonStock)
+                        .warehouseStockBucheon(bucheonStock)
                         .isActive(true)
                         .description(optionName)
                         .createdAt(now)

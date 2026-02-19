@@ -25,6 +25,107 @@ public class InventoryService {
     private final InventoryTransactionRepository transactionRepository;
     
     /**
+     * 입고 처리 (창고별)
+     */
+    @Transactional
+    public Product processInboundWithWarehouse(UUID productId, int quantity, String warehouse, String location, String notes) {
+        log.info("📦 입고 처리 (창고별): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouse);
+        
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        
+        // 창고별 재고 증가
+        switch (warehouse) {
+            case "1.본사(안양)":
+                product.setWarehouseStockAnyang(product.getWarehouseStockAnyang() + quantity);
+                break;
+            case "2.고백창고(이천)":
+                product.setWarehouseStockIcheon(product.getWarehouseStockIcheon() + quantity);
+                break;
+            case "3.부천검수창고":
+                product.setWarehouseStockBucheon(product.getWarehouseStockBucheon() + quantity);
+                break;
+        }
+        
+        // 총 재고 증가
+        product.increaseStock(quantity);
+        
+        // 거래 내역 기록
+        String detailedNotes = String.format("창고:%s | %s", warehouse, notes);
+        InventoryTransaction transaction = InventoryTransaction.createInbound(
+            product, quantity, location, detailedNotes
+        );
+        transactionRepository.save(transaction);
+        
+        Product saved = productRepository.save(product);
+        
+        log.info("✅ 입고 완료: {} - 창고:{}, 재고 {} → {}", 
+            product.getProductName(), 
+            warehouse,
+            transaction.getBeforeStock(), 
+            transaction.getAfterStock());
+        
+        return saved;
+    }
+    
+    /**
+     * 출고 처리 (창고별)
+     */
+    @Transactional
+    public Product processOutboundWithWarehouse(UUID productId, int quantity, String warehouse, UUID orderId, String notes) {
+        log.info("📤 출고 처리 (창고별): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouse);
+        
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        
+        // 창고별 재고 확인 및 차감
+        int warehouseStock = 0;
+        switch (warehouse) {
+            case "1.본사(안양)":
+                warehouseStock = product.getWarehouseStockAnyang();
+                if (warehouseStock < quantity) {
+                    throw new IllegalStateException(warehouse + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
+                }
+                product.setWarehouseStockAnyang(warehouseStock - quantity);
+                break;
+            case "2.고백창고(이천)":
+                warehouseStock = product.getWarehouseStockIcheon();
+                if (warehouseStock < quantity) {
+                    throw new IllegalStateException(warehouse + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
+                }
+                product.setWarehouseStockIcheon(warehouseStock - quantity);
+                break;
+            case "3.부천검수창고":
+                warehouseStock = product.getWarehouseStockBucheon();
+                if (warehouseStock < quantity) {
+                    throw new IllegalStateException(warehouse + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
+                }
+                product.setWarehouseStockBucheon(warehouseStock - quantity);
+                break;
+        }
+        
+        // 총 재고 차감
+        product.decreaseStock(quantity);
+        
+        // 거래 내역 기록
+        String detailedNotes = String.format("창고:%s | %s", warehouse, notes);
+        InventoryTransaction transaction = InventoryTransaction.createOutbound(
+            product, quantity, orderId, detailedNotes
+        );
+        transactionRepository.save(transaction);
+        
+        Product saved = productRepository.save(product);
+        
+        log.info("✅ 출고 완료: {} - 창고:{}, 재고 {} → {}", 
+            product.getProductName(), 
+            warehouse,
+            transaction.getBeforeStock(), 
+            transaction.getAfterStock());
+        
+        return saved;
+    }
+    
+    /**
      * 입고 처리
      */
     @Transactional

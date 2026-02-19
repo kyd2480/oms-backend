@@ -63,6 +63,16 @@ public class Product {
     @Column(name = "warehouse_location", length = 100)
     private String warehouseLocation;  // 창고 위치
     
+    // 창고별 재고 (JSON 형식으로 저장)
+    @Column(name = "warehouse_stock_anyang")
+    private Integer warehouseStockAnyang = 0;  // 1.본사(안양)
+    
+    @Column(name = "warehouse_stock_icheon")
+    private Integer warehouseStockIcheon = 0;  // 2.고백창고(이천)
+    
+    @Column(name = "warehouse_stock_bucheon")
+    private Integer warehouseStockBucheon = 0;  // 3.부천검수창고
+    
     @Column(name = "is_active")
     private Boolean isActive = true;
     

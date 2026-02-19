@@ -150,6 +150,49 @@ public class InventoryController {
     }
     
     /**
+     * 입고 처리 (창고 지정)
+     */
+    @PostMapping("/inbound-warehouse")
+    public ResponseEntity<ProductDto> processInboundWarehouse(@RequestBody InventoryDto.InboundWarehouseRequest request) {
+        log.info("📦 입고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}", 
+            request.getProductId(), request.getQuantity(), request.getWarehouse());
+        
+        Product product = inventoryService.processInboundWithWarehouse(
+            request.getProductId(),
+            request.getQuantity(),
+            request.getWarehouse(),
+            request.getLocation(),
+            request.getNotes()
+        );
+        
+        return ResponseEntity.ok(toProductDto(product));
+    }
+    
+    /**
+     * 출고 처리 (창고 지정)
+     */
+    @PostMapping("/outbound-warehouse")
+    public ResponseEntity<ProductDto> processOutboundWarehouse(@RequestBody InventoryDto.OutboundWarehouseRequest request) {
+        log.info("📤 출고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}", 
+            request.getProductId(), request.getQuantity(), request.getWarehouse());
+        
+        try {
+            Product product = inventoryService.processOutboundWithWarehouse(
+                request.getProductId(),
+                request.getQuantity(),
+                request.getWarehouse(),
+                request.getOrderId(),
+                request.getNotes()
+            );
+            
+            return ResponseEntity.ok(toProductDto(product));
+        } catch (IllegalStateException e) {
+            log.error("❌ 출고 실패: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
+    }
+    
+    /**
      * 입고 처리
      */
     @PostMapping("/inbound")
@@ -294,6 +337,9 @@ public class InventoryController {
             .reservedStock(product.getReservedStock())
             .safetyStock(product.getSafetyStock())
             .warehouseLocation(product.getWarehouseLocation())
+            .warehouseStockAnyang(product.getWarehouseStockAnyang())
+            .warehouseStockIcheon(product.getWarehouseStockIcheon())
+            .warehouseStockBucheon(product.getWarehouseStockBucheon())
             .isActive(product.getIsActive())
             .description(product.getDescription())
             .isBelowSafetyStock(product.isBelowSafetyStock())

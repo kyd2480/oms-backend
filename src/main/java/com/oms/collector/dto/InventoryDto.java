@@ -14,6 +14,36 @@ import java.util.UUID;
 public class InventoryDto {
     
     /**
+     * 입고 요청 (창고 지정)
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class InboundWarehouseRequest {
+        private UUID productId;
+        private Integer quantity;
+        private String warehouse;  // 1.본사(안양), 2.고백창고(이천), 3.부천검수창고
+        private String location;
+        private String notes;
+    }
+    
+    /**
+     * 출고 요청 (창고 지정)
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class OutboundWarehouseRequest {
+        private UUID productId;
+        private Integer quantity;
+        private String warehouse;  // 1.본사(안양), 2.고백창고(이천), 3.부천검수창고
+        private UUID orderId;
+        private String notes;
+    }
+    
+    /**
      * 입고 요청
      */
     @Data
