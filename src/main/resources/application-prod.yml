@@ -1,9 +1,17 @@
 # ============================================
 # Production Configuration for Railway/Render
+# 안정성 최적화
 # ============================================
 
 server:
-  port: ${PORT:8091}  # Railway는 PORT 환경변수 사용
+  port: ${PORT:8091}
+  tomcat:
+    threads:
+      max: 50          # 최대 스레드
+      min-spare: 10    # 최소 유휴 스레드
+    connection-timeout: 60000  # 60초
+    max-connections: 100       # 최대 연결 수
+  shutdown: graceful           # 우아한 종료
 
 spring:
   application:
@@ -22,21 +30,28 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/railway}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5  # 무료 플랜은 연결 수 제한
+      maximum-pool-size: 5
       minimum-idle: 2
-      connection-timeout: 20000
+      connection-timeout: 30000      # 30초
+      idle-timeout: 600000           # 10분
+      max-lifetime: 1800000          # 30분
+      leak-detection-threshold: 60000  # 연결 누수 감지
+      connection-test-query: "SELECT 1"
   
   # JPA 설정
   jpa:
     hibernate:
-      ddl-auto: update  # 프로덕션에서는 validate 권장, 지금은 update
-    show-sql: false  # 프로덕션에서는 false
+      ddl-auto: update
+    show-sql: false
     properties:
       hibernate:
         format_sql: false
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
+          batch_size: 50               # 배치 크기
+        order_inserts: true            # INSERT 순서 최적화
+        order_updates: true            # UPDATE 순서 최적화
     open-in-view: false
   
   # JSON 설정
@@ -51,10 +66,17 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true  # Liveness/Readiness 프로브
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
 
 # 로깅 설정 (프로덕션)
 logging:
@@ -63,13 +85,15 @@ logging:
     com.oms.collector: INFO
     org.springframework.web: WARN
     org.hibernate: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
 # 주문 수집 설정
 collector:
   schedule:
-    enabled: ${SCHEDULER_ENABLED:true}  # 환경변수로 제어
-    interval: 600000  # 10분
-    initial-delay: 60000  # 1분
+    enabled: ${SCHEDULER_ENABLED:true}
+    interval: 600000     # 10분
+    initial-delay: 120000  # 2분 (시작 시간 여유)
   retry:
     max-attempts: 3
     delay: 5000

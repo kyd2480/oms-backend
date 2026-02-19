@@ -1,9 +1,13 @@
-# Railway Nixpacks 설정
+# Railway Nixpacks 설정 - 안정성 최적화
 [phases.setup]
 nixPkgs = ["openjdk17"]
 
 [phases.build]
-cmds = ["./gradlew clean build -x test --no-daemon"]
+# 빌드 안정성: 테스트 스킵, 데몬 비활성화, 병렬 빌드
+cmds = [
+  "./gradlew clean build -x test --no-daemon --parallel --max-workers=2"
+]
 
 [start]
-cmd = "java -jar -Dspring.profiles.active=prod build/libs/*.jar"
+# 시작 안정성: 메모리 제한, GC 최적화, 타임존 설정
+cmd = "java -Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Dserver.port=$PORT -Dspring.profiles.active=prod -Duser.timezone=Asia/Seoul -jar build/libs/*.jar"
