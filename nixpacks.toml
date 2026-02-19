@@ -10,4 +10,5 @@ cmds = [
 
 [start]
 # 시작 안정성: 메모리 제한, GC 최적화, 타임존 설정
+# Railway는 자체적으로 healthcheck를 수행하므로 앱은 단순히 실행만 함
 cmd = "java -Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Dserver.port=$PORT -Dspring.profiles.active=prod -Duser.timezone=Asia/Seoul -jar build/libs/*.jar"
