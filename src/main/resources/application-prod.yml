@@ -52,6 +52,7 @@ spring:
           batch_size: 50               # 배치 크기
         order_inserts: true            # INSERT 순서 최적화
         order_updates: true            # UPDATE 순서 최적화
+        generate_statistics: false      # 통계 생성 비활성화 (성능 향상)
     open-in-view: false
   
   # JSON 설정

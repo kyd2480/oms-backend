@@ -83,45 +83,49 @@ public class ProductInitController {
         }
         
         try {
-            // 파일 파싱만 먼저 해서 개수 확인
+            // CSV 파싱
             List<Product> products = parseCsvFile(file);
             int totalCount = products.size();
             
             log.info("✅ CSV 파싱 완료: {}개 상품", totalCount);
             
-            // 즉시 응답 (비동기 저장은 백그라운드에서)
-            String message = String.format("CSV 파일 업로드 시작 - 총 %d개 상품 처리 중...", totalCount);
+            // 동기 저장 (배치 처리)
+            int newCount = 0;
+            int updateCount = 0;
+            int batchSize = 100;
             
-            // 비동기로 DB 저장 (별도 스레드)
-            new Thread(() -> {
-                try {
-                    int newCount = 0;
-                    int updateCount = 0;
-                    
-                    // 배치 처리 (100개씩)
-                    for (int i = 0; i < products.size(); i += 100) {
-                        int end = Math.min(i + 100, products.size());
-                        List<Product> batch = products.subList(i, end);
-                        
-                        for (Product product : batch) {
-                            if (productRepository.existsBySku(product.getSku())) {
-                                updateCount++;
-                            } else {
-                                productRepository.save(product);
-                                newCount++;
-                            }
-                        }
-                        
-                        log.info("진행률: {}/{} ({}%)", end, products.size(), (end * 100 / products.size()));
-                    }
-                    
-                    log.info("✅ CSV 저장 완료 - 신규: {}개, 기존: {}개, 총: {}개", newCount, updateCount, products.size());
-                } catch (Exception e) {
-                    log.error("❌ 백그라운드 저장 실패", e);
+            log.info("📝 DB 저장 시작...");
+            
+            // 배치 저장 (saveAll 사용)
+            List<Product> productsToSave = new ArrayList<>();
+            
+            for (Product product : products) {
+                if (!productRepository.existsBySku(product.getSku())) {
+                    productsToSave.add(product);
+                    newCount++;
+                } else {
+                    updateCount++;
                 }
-            }).start();
+                
+                // 500개씩 배치 저장
+                if (productsToSave.size() >= 500) {
+                    productRepository.saveAll(productsToSave);
+                    log.info("배치 저장: {}개", productsToSave.size());
+                    productsToSave.clear();
+                }
+            }
             
-            return ResponseEntity.accepted().body(message);
+            // 남은 상품 저장
+            if (!productsToSave.isEmpty()) {
+                productRepository.saveAll(productsToSave);
+                log.info("최종 배치 저장: {}개", productsToSave.size());
+            }
+            
+            String message = String.format("CSV 업로드 완료 - 신규: %d개, 기존: %d개, 총: %d개", 
+                newCount, updateCount, products.size());
+            
+            log.info("✅ " + message);
+            return ResponseEntity.ok(message);
             
         } catch (Exception e) {
             log.error("❌ CSV 파싱 실패", e);
