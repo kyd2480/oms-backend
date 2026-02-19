@@ -55,11 +55,15 @@ public class InventoryController {
     }
     
     /**
-     * 상품 검색
+     * 상품 검색 (통합: 상품명, SKU, 바코드)
      */
     @GetMapping("/products/search")
     public ResponseEntity<List<ProductDto>> searchProducts(@RequestParam String keyword) {
-        List<Product> products = productRepository.findByProductNameContainingIgnoreCaseAndIsActiveTrue(keyword);
+        log.info("🔍 상품 검색: {}", keyword);
+        
+        List<Product> products = productRepository.searchProducts(keyword);
+        
+        log.info("✅ 검색 결과: {}개", products.size());
         
         List<ProductDto> dtos = products.stream()
             .map(this::toProductDto)

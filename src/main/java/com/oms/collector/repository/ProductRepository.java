@@ -57,4 +57,15 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      */
     @Query("SELECT p FROM Product p WHERE (p.sku LIKE %:keyword% OR p.barcode LIKE %:keyword%) AND p.isActive = true")
     List<Product> findBySkuOrBarcodeContaining(String keyword);
+    
+    /**
+     * 통합 검색 (상품명, SKU, 바코드)
+     */
+    @Query("SELECT p FROM Product p WHERE " +
+           "(LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "AND p.isActive = true " +
+           "ORDER BY p.productName ASC")
+    List<Product> searchProducts(String keyword);
 }
