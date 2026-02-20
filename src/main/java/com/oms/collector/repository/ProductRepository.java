@@ -21,6 +21,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     Optional<Product> findBySku(String sku);
     
     /**
+     * 바코드로 상품 조회
+     */
+    Optional<Product> findByBarcode(String barcode);
+    
+    /**
      * SKU 존재 여부
      */
     boolean existsBySku(String sku);
