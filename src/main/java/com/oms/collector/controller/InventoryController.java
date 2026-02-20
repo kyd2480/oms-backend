@@ -395,11 +395,13 @@ public class InventoryController {
     }
     
     private InventoryDto.TransactionResponse toTransactionDto(InventoryTransaction transaction) {
+        Product product = transaction.getProduct();
+        
         return InventoryDto.TransactionResponse.builder()
             .transactionId(transaction.getTransactionId())
-            .productId(transaction.getProduct().getProductId())
-            .productName(transaction.getProduct().getProductName())
-            .sku(transaction.getProduct().getSku())
+            .productId(product != null ? product.getProductId() : null)
+            .productName(product != null ? product.getProductName() : "알 수 없음")
+            .sku(product != null ? product.getSku() : "N/A")
             .transactionType(transaction.getTransactionType())
             .quantity(transaction.getQuantity())
             .beforeStock(transaction.getBeforeStock())

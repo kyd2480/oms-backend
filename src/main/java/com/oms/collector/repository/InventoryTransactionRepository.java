@@ -28,17 +28,19 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
     );
     
     /**
-     * 최근 거래 내역 조회
+     * 최근 거래 내역 조회 (FETCH JOIN으로 Product 즉시 로딩)
      */
-    List<InventoryTransaction> findAllByOrderByCreatedAtDesc(Pageable pageable);
+    @Query("SELECT t FROM InventoryTransaction t JOIN FETCH t.product ORDER BY t.createdAt DESC")
+    List<InventoryTransaction> findRecentTransactionsWithProduct(Pageable pageable);
     
     /**
-     * 거래 내역 검색 (상품명, SKU, 바코드)
+     * 거래 내역 검색 (상품명, SKU, 바코드 - FETCH JOIN)
      */
     @Query("SELECT t FROM InventoryTransaction t " +
-           "WHERE LOWER(t.product.productName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "OR LOWER(t.product.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "OR LOWER(t.product.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "JOIN FETCH t.product p " +
+           "WHERE LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
            "ORDER BY t.createdAt DESC")
-    List<InventoryTransaction> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
+    List<InventoryTransaction> searchTransactionsWithProduct(@Param("keyword") String keyword, Pageable pageable);
 }

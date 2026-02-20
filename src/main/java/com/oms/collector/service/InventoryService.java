@@ -287,7 +287,7 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public List<InventoryTransaction> getRecentTransactions(int limit) {
         Pageable pageable = PageRequest.of(0, limit);
-        return transactionRepository.findAllByOrderByCreatedAtDesc(pageable);
+        return transactionRepository.findRecentTransactionsWithProduct(pageable);
     }
     
     /**
@@ -296,6 +296,6 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public List<InventoryTransaction> searchTransactions(String keyword, int limit) {
         Pageable pageable = PageRequest.of(0, limit);
-        return transactionRepository.searchByKeyword(keyword, pageable);
+        return transactionRepository.searchTransactionsWithProduct(keyword, pageable);
     }
 }
