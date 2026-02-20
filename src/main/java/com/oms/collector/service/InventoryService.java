@@ -278,4 +278,20 @@ public class InventoryService {
             product, startDate, endDate
         );
     }
+    
+    /**
+     * 최근 거래 내역 조회 (전체)
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryTransaction> getRecentTransactions(int limit) {
+        return transactionRepository.findTopNByOrderByCreatedAtDesc(limit);
+    }
+    
+    /**
+     * 거래 내역 검색 (상품명, SKU, 바코드)
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryTransaction> searchTransactions(String keyword, int limit) {
+        return transactionRepository.searchTransactionsByProductKeyword(keyword, limit);
+    }
 }

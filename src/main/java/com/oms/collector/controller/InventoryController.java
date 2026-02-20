@@ -280,7 +280,48 @@ public class InventoryController {
     }
     
     /**
-     * 재고 거래 내역 조회
+     * 전체 거래 내역 조회 (최신순, 페이징)
+     */
+    @GetMapping("/transactions")
+    public ResponseEntity<List<InventoryDto.TransactionResponse>> getAllTransactions(
+            @RequestParam(required = false, defaultValue = "100") int limit) {
+        
+        log.info("📋 전체 거래 내역 조회: limit={}", limit);
+        
+        List<InventoryTransaction> transactions = inventoryService.getRecentTransactions(limit);
+        
+        List<InventoryDto.TransactionResponse> dtos = transactions.stream()
+            .map(this::toTransactionDto)
+            .collect(Collectors.toList());
+        
+        log.info("✅ 거래 내역 {}건 조회", dtos.size());
+        
+        return ResponseEntity.ok(dtos);
+    }
+    
+    /**
+     * 거래 내역 검색 (상품명, SKU, 바코드)
+     */
+    @GetMapping("/transactions/search")
+    public ResponseEntity<List<InventoryDto.TransactionResponse>> searchTransactions(
+            @RequestParam String keyword,
+            @RequestParam(required = false, defaultValue = "100") int limit) {
+        
+        log.info("🔍 거래 내역 검색: keyword={}, limit={}", keyword, limit);
+        
+        List<InventoryTransaction> transactions = inventoryService.searchTransactions(keyword, limit);
+        
+        List<InventoryDto.TransactionResponse> dtos = transactions.stream()
+            .map(this::toTransactionDto)
+            .collect(Collectors.toList());
+        
+        log.info("✅ 검색 결과 {}건", dtos.size());
+        
+        return ResponseEntity.ok(dtos);
+    }
+    
+    /**
+     * 재고 거래 내역 조회 (특정 상품)
      */
     @GetMapping("/products/{id}/transactions")
     public ResponseEntity<List<InventoryDto.TransactionResponse>> getTransactionHistory(
