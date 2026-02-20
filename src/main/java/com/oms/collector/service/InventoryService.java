@@ -6,6 +6,8 @@ import com.oms.collector.repository.InventoryTransactionRepository;
 import com.oms.collector.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -284,7 +286,8 @@ public class InventoryService {
      */
     @Transactional(readOnly = true)
     public List<InventoryTransaction> getRecentTransactions(int limit) {
-        return transactionRepository.findTopNByOrderByCreatedAtDesc(limit);
+        Pageable pageable = PageRequest.of(0, limit);
+        return transactionRepository.findAllByOrderByCreatedAtDesc(pageable);
     }
     
     /**
@@ -292,6 +295,7 @@ public class InventoryService {
      */
     @Transactional(readOnly = true)
     public List<InventoryTransaction> searchTransactions(String keyword, int limit) {
-        return transactionRepository.searchTransactionsByProductKeyword(keyword, limit);
+        Pageable pageable = PageRequest.of(0, limit);
+        return transactionRepository.searchByKeyword(keyword, pageable);
     }
 }

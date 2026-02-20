@@ -2,7 +2,6 @@ package com.oms.collector.repository;
 
 import com.oms.collector.entity.InventoryTransaction;
 import com.oms.collector.entity.Product;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -20,24 +19,6 @@ import java.util.UUID;
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, UUID> {
     
     /**
-     * 상품별 거래 내역 조회
-     */
-    Page<InventoryTransaction> findByProductOrderByCreatedAtDesc(Product product, Pageable pageable);
-    
-    /**
-     * 거래 유형별 조회
-     */
-    List<InventoryTransaction> findByTransactionTypeOrderByCreatedAtDesc(String transactionType);
-    
-    /**
-     * 기간별 거래 내역
-     */
-    List<InventoryTransaction> findByCreatedAtBetweenOrderByCreatedAtDesc(
-        LocalDateTime startDate, 
-        LocalDateTime endDate
-    );
-    
-    /**
      * 상품 + 기간별 거래 내역
      */
     List<InventoryTransaction> findByProductAndCreatedAtBetweenOrderByCreatedAtDesc(
@@ -47,23 +28,17 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
     );
     
     /**
-     * 최근 거래 내역 조회 (Limit)
+     * 최근 거래 내역 조회
      */
-    @Query(value = "SELECT * FROM inventory_transactions ORDER BY created_at DESC LIMIT :limit", nativeQuery = true)
-    List<InventoryTransaction> findTopNByOrderByCreatedAtDesc(@Param("limit") int limit);
+    List<InventoryTransaction> findAllByOrderByCreatedAtDesc(Pageable pageable);
     
     /**
      * 거래 내역 검색 (상품명, SKU, 바코드)
      */
-    @Query(value = "SELECT t.* FROM inventory_transactions t " +
-           "JOIN products p ON t.product_id = p.product_id " +
-           "WHERE (LOWER(p.product_name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "OR LOWER(p.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
-           "ORDER BY t.created_at DESC LIMIT :limit", 
-           nativeQuery = true)
-    List<InventoryTransaction> searchTransactionsByProductKeyword(
-        @Param("keyword") String keyword, 
-        @Param("limit") int limit
-    );
+    @Query("SELECT t FROM InventoryTransaction t " +
+           "WHERE LOWER(t.product.productName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(t.product.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(t.product.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "ORDER BY t.createdAt DESC")
+    List<InventoryTransaction> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
 }
