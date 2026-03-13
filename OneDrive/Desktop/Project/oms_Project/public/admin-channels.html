@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>판매처 관리 - OMS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #718096;
+        }
+
+        .actions {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .channels-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .channel-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+
+        .channel-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .channel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .channel-name {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #2d3748;
+        }
+
+        .channel-code {
+            font-size: 0.875rem;
+            color: #718096;
+            background: #edf2f7;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            margin-top: 0.25rem;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-inactive {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .channel-info {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #f7fafc;
+            border-radius: 8px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: #718096;
+            font-size: 0.875rem;
+        }
+
+        .info-value {
+            color: #2d3748;
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .channel-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .btn-small {
+            flex: 1;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .btn-toggle {
+            background: #edf2f7;
+            color: #2d3748;
+        }
+
+        .btn-edit {
+            background: #bee3f8;
+            color: #2c5282;
+        }
+
+        .btn-delete {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            color: #2d3748;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #4a5568;
+            font-weight: 600;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn-secondary {
+            background: #edf2f7;
+            color: #2d3748;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: white;
+            font-size: 1.25rem;
+        }
+
+        .empty-state {
+            background: white;
+            padding: 3rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+
+        .empty-state-text {
+            color: #718096;
+            margin-bottom: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏪 판매처 관리</h1>
+            <p>판매처를 추가하고 관리하세요</p>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary" onclick="openAddModal()">
+                ➕ 판매처 추가
+            </button>
+            <button class="btn btn-secondary" onclick="location.href='index.html'">
+                📊 대시보드로 돌아가기
+            </button>
+        </div>
+
+        <div id="channelsContainer" class="channels-grid">
+            <div class="loading">판매처 목록을 불러오는 중...</div>
+        </div>
+
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <div class="empty-state-icon">📦</div>
+            <div class="empty-state-text">등록된 판매처가 없습니다</div>
+            <button class="btn btn-primary" onclick="openAddModal()">
+                첫 판매처 추가하기
+            </button>
+        </div>
+    </div>
+
+    <!-- 추가/수정 모달 -->
+    <div id="channelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modalTitle">판매처 추가</div>
+            <form id="channelForm">
+                <input type="hidden" id="channelId">
+                
+                <div class="form-group">
+                    <label class="form-label">판매처 코드 *</label>
+                    <input type="text" id="channelCode" class="form-input" 
+                           placeholder="예: NAVER" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">판매처 이름 *</label>
+                    <input type="text" id="channelName" class="form-input" 
+                           placeholder="예: 네이버 스마트스토어" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">API 타입</label>
+                    <select id="apiType" class="form-input">
+                        <option value="REST">REST API</option>
+                        <option value="SOAP">SOAP</option>
+                        <option value="CSV">CSV</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">API URL</label>
+                    <input type="url" id="apiBaseUrl" class="form-input" 
+                           placeholder="https://api.example.com">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">수집 주기 (분)</label>
+                    <input type="number" id="collectionInterval" class="form-input" 
+                           value="10" min="1">
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" style="flex: 1" 
+                            onclick="closeModal()">
+                        취소
+                    </button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1">
+                        저장
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://oms-backend-production-8a38.up.railway.app/api/admin/channels';
+
+        let channels = [];
+        let editingChannel = null;
+
+        // 페이지 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            loadChannels();
+        });
+
+        // 판매처 목록 로드
+        async function loadChannels() {
+            try {
+                const response = await fetch(API_BASE);
+                channels = await response.json();
+                
+                renderChannels();
+            } catch (error) {
+                console.error('판매처 로드 실패:', error);
+                document.getElementById('channelsContainer').innerHTML = `
+                    <div class="loading" style="color: #e53e3e;">
+                        ❌ 판매처 목록을 불러올 수 없습니다
+                    </div>
+                `;
+            }
+        }
+
+        // 판매처 목록 렌더링
+        function renderChannels() {
+            const container = document.getElementById('channelsContainer');
+            const emptyState = document.getElementById('emptyState');
+
+            if (channels.length === 0) {
+                container.style.display = 'none';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            container.style.display = 'grid';
+            emptyState.style.display = 'none';
+
+            container.innerHTML = channels.map(channel => `
+                <div class="channel-card">
+                    <div class="channel-header">
+                        <div>
+                            <div class="channel-name">${channel.channelName}</div>
+                            <div class="channel-code">${channel.channelCode}</div>
+                        </div>
+                        <span class="status-badge ${channel.isActive ? 'status-active' : 'status-inactive'}">
+                            ${channel.isActive ? '● 활성' : '○ 비활성'}
+                        </span>
+                    </div>
+
+                    <div class="channel-info">
+                        <div class="info-row">
+                            <span class="info-label">API 타입</span>
+                            <span class="info-value">${channel.apiType || '-'}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">수집 주기</span>
+                            <span class="info-value">${channel.collectionInterval}분</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">마지막 수집</span>
+                            <span class="info-value">
+                                ${channel.lastCollectedAt ? new Date(channel.lastCollectedAt).toLocaleString() : '없음'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="channel-actions">
+                        <button class="btn btn-small btn-toggle" 
+                                onclick="toggleChannel('${channel.channelId}')">
+                            ${channel.isActive ? '일시정지' : '활성화'}
+                        </button>
+                        <button class="btn btn-small btn-edit" 
+                                onclick="openEditModal('${channel.channelId}')">
+                            수정
+                        </button>
+                        <button class="btn btn-small btn-delete" 
+                                onclick="deleteChannel('${channel.channelId}', '${channel.channelName}')">
+                            삭제
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 추가 모달 열기
+        function openAddModal() {
+            editingChannel = null;
+            document.getElementById('modalTitle').textContent = '판매처 추가';
+            document.getElementById('channelForm').reset();
+            document.getElementById('channelId').value = '';
+            document.getElementById('channelCode').disabled = false;
+            document.getElementById('channelModal').classList.add('active');
+        }
+
+        // 수정 모달 열기
+        function openEditModal(id) {
+            editingChannel = channels.find(c => c.channelId === id);
+            if (!editingChannel) return;
+
+            document.getElementById('modalTitle').textContent = '판매처 수정';
+            document.getElementById('channelId').value = editingChannel.channelId;
+            document.getElementById('channelCode').value = editingChannel.channelCode;
+            document.getElementById('channelCode').disabled = true;
+            document.getElementById('channelName').value = editingChannel.channelName;
+            document.getElementById('apiType').value = editingChannel.apiType || 'REST';
+            document.getElementById('apiBaseUrl').value = editingChannel.apiBaseUrl || '';
+            document.getElementById('collectionInterval').value = editingChannel.collectionInterval || 10;
+            
+            document.getElementById('channelModal').classList.add('active');
+        }
+
+        // 모달 닫기
+        function closeModal() {
+            document.getElementById('channelModal').classList.remove('active');
+            editingChannel = null;
+        }
+
+        // 폼 제출
+        document.getElementById('channelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const channelId = document.getElementById('channelId').value;
+            const data = {
+                channelCode: document.getElementById('channelCode').value,
+                channelName: document.getElementById('channelName').value,
+                apiType: document.getElementById('apiType').value,
+                apiBaseUrl: document.getElementById('apiBaseUrl').value,
+                collectionInterval: parseInt(document.getElementById('collectionInterval').value)
+            };
+
+            try {
+                const url = channelId ? `${API_BASE}/${channelId}` : API_BASE;
+                const method = channelId ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    closeModal();
+                    await loadChannels();
+                    alert(channelId ? '판매처가 수정되었습니다!' : '판매처가 추가되었습니다!');
+                } else {
+                    alert('저장에 실패했습니다.');
+                }
+            } catch (error) {
+                console.error('저장 실패:', error);
+                alert('저장 중 오류가 발생했습니다.');
+            }
+        });
+
+        // 활성화/비활성화 토글
+        async function toggleChannel(id) {
+            try {
+                const response = await fetch(`${API_BASE}/${id}/toggle`, {
+                    method: 'PATCH'
+                });
+
+                if (response.ok) {
+                    await loadChannels();
+                }
+            } catch (error) {
+                console.error('상태 변경 실패:', error);
+                alert('상태 변경에 실패했습니다.');
+            }
+        }
+
+        // 판매처 삭제
+        async function deleteChannel(id, name) {
+            if (!confirm(`정말 "${name}" 판매처를 삭제하시겠습니까?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    await loadChannels();
+                    alert('판매처가 삭제되었습니다.');
+                } else {
+                    alert('삭제에 실패했습니다.');
+                }
+            } catch (error) {
+                console.error('삭제 실패:', error);
+                alert('삭제 중 오류가 발생했습니다.');
+            }
+        }
+
+        // 모달 외부 클릭 시 닫기
+        document.getElementById('channelModal').addEventListener('click', (e) => {
+            if (e.target.id === 'channelModal') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

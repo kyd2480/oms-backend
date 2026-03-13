@@ -1,0 +1,30 @@
+# Netlify 배포 설정
+[build]
+  # 빌드 명령어
+  command = "npm run build"
+  
+  # 빌드 결과물 디렉토리
+  publish = "dist"
+  
+  # Node.js 버전
+  [build.environment]
+    NODE_VERSION = "18"
+
+# SPA를 위한 리다이렉트 설정 (404 → index.html)
+# admin-channels.html은 예외 처리
+[[redirects]]
+  from = "/admin-channels.html"
+  to = "/admin-channels.html"
+  status = 200
+  force = false
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# CORS 헤더 추가 (선택사항)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
