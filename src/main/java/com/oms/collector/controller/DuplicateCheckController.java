@@ -87,7 +87,7 @@ public class DuplicateCheckController {
 
     /**
      * 중복 검사
-     * GET /api/processing/duplicate/check?criteria=PHONE_AMOUNT
+     * GET /api/processing/duplicate/check?criteria=ORDER_NO
      */
     @GetMapping("/check")
     @Transactional(readOnly = true)
@@ -177,7 +177,7 @@ public class DuplicateCheckController {
         try {
             criteria = Criteria.valueOf(body.getOrDefault("criteria", "ORDER_NO"));
         } catch (IllegalArgumentException e) {
-            criteria = Criteria.PHONE_AMOUNT;
+            criteria = Criteria.ORDER_NO;
         }
         log.info("최신 1건 유지 처리: criteria={}", criteria);
 
