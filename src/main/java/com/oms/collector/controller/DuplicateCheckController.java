@@ -14,9 +14,9 @@ import java.util.stream.Collectors;
 /**
  * 중복 주문 검사 컨트롤러
  *
- * GET  /api/processing/duplicate/check?criteria=PHONE_SKU
- * POST /api/processing/duplicate/cancel   (선택 주문 취소)
- * POST /api/processing/duplicate/keep-latest (각 그룹 최신 1건만 남기기)
+ * 중복 기준:
+ *   ORDER_NO         : 쇼핑몰 주문번호 완전 일치 (중복 수집된 경우)
+ *   NAME_PHONE_ITEM  : 이름 + 연락처 + 상품명 일치 (같은 사람이 같은 상품 중복 주문)
  */
 @Slf4j
 @RestController
@@ -27,56 +27,78 @@ public class DuplicateCheckController {
 
     private final OrderRepository orderRepository;
 
-    // ─── 중복 감지 기준 ────────────────────────────────────────────
     public enum Criteria {
-        PHONE_SKU,          // 연락처 + 상품코드
-        PHONE_PRODUCT,      // 연락처 + 상품명(앞 10자)
-        NAME_ADDRESS_SKU,   // 수취인 + 주소(앞 15자) + 상품코드
-        ORDER_NO            // 주문번호 완전일치
+        ORDER_NO,        // 쇼핑몰 주문번호 일치
+        NAME_PHONE_ITEM  // 이름 + 연락처 + 상품명 일치
     }
 
-    // ─── 응답 DTO ─────────────────────────────────────────────────
-    public record DupOrderDTO(
-        String orderId,
-        String orderNo,
-        String channelName,
-        String recipientName,
-        String recipientPhone,
-        String address,
-        String productName,
-        String productCode,
-        int    quantity,
-        String orderStatus,
-        String orderedAt
-    ) {}
+    // ─── DTO ─────────────────────────────────────────────────────
+    public static class DupOrderDTO {
+        public String orderId;
+        public String orderNo;
+        public String channelOrderNo;
+        public String channelName;
+        public String recipientName;
+        public String recipientPhone;
+        public String address;
+        public String totalAmount;
+        public String orderStatus;
+        public String orderedAt;
 
-    public record DupGroupDTO(
-        String groupKey,
-        int    count,
-        List<DupOrderDTO> orders
-    ) {}
+        public DupOrderDTO(Order o) {
+            this.orderId        = o.getOrderId() != null ? o.getOrderId().toString() : "";
+            this.orderNo        = o.getOrderNo();
+            this.channelOrderNo = o.getChannelOrderNo();
+            this.channelName    = o.getChannel() != null ? o.getChannel().getChannelName() : "";
+            this.recipientName  = o.getRecipientName();
+            this.recipientPhone = o.getRecipientPhone();
+            this.address        = o.getAddress();
+            this.totalAmount    = o.getTotalAmount() != null ? o.getTotalAmount().toPlainString() : "0";
+            this.orderStatus    = o.getOrderStatus() != null ? o.getOrderStatus().name() : "";
+            this.orderedAt      = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
+        }
+    }
 
-    public record DupResultDTO(
-        int              totalOrders,
-        int              dupGroups,
-        int              dupOrders,
-        List<DupGroupDTO> groups
-    ) {}
+    public static class DupGroupDTO {
+        public String groupKey;
+        public int count;
+        public List<DupOrderDTO> orders;
+
+        public DupGroupDTO(String key, List<DupOrderDTO> orders) {
+            this.groupKey = key;
+            this.count    = orders.size();
+            this.orders   = orders;
+        }
+    }
+
+    public static class DupResultDTO {
+        public int totalOrders;
+        public int dupGroups;
+        public int dupOrders;
+        public List<DupGroupDTO> groups;
+
+        public DupResultDTO(int total, List<DupGroupDTO> groups) {
+            this.totalOrders = total;
+            this.dupGroups   = groups.size();
+            this.dupOrders   = groups.stream().mapToInt(g -> g.count).sum();
+            this.groups      = groups;
+        }
+    }
 
     /**
-     * 중복 주문 검사
-     * GET /api/processing/duplicate/check?criteria=PHONE_SKU
+     * 중복 검사
+     * GET /api/processing/duplicate/check?criteria=PHONE_AMOUNT
      */
     @GetMapping("/check")
     @Transactional(readOnly = true)
     public ResponseEntity<DupResultDTO> checkDuplicates(
-        @RequestParam(defaultValue = "PHONE_SKU") Criteria criteria
+        @RequestParam(defaultValue = "ORDER_NO") Criteria criteria
     ) {
-        log.info("중복 주문 검사 시작: criteria={}", criteria);
+        log.info("중복 주문 검사: criteria={}", criteria);
 
-        // 취소된 주문 제외하고 전체 조회
+        // 취소된 주문 제외
         List<Order> orders = orderRepository.findAll().stream()
-            .filter(o -> !"CANCELLED".equals(o.getOrderStatus()))
+            .filter(o -> o.getOrderStatus() != Order.OrderStatus.CANCELLED)
             .collect(Collectors.toList());
 
         // Lazy loading 초기화
@@ -85,41 +107,40 @@ public class DuplicateCheckController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
-        // 그룹핑 키 생성
+        // 그룹핑
         Map<String, List<Order>> grouped = new LinkedHashMap<>();
         for (Order o : orders) {
             String key = buildKey(o, criteria);
-            if (key == null || key.isBlank() || key.equals("|") || key.equals("||")) continue;
+            if (key == null || key.isBlank() || key.startsWith("|") || key.endsWith("|")) continue;
             grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(o);
         }
 
-        // 2건 이상인 그룹만 중복
+        // 2건 이상인 그룹 = 중복, 최신순 정렬
         List<DupGroupDTO> dupGroups = grouped.entrySet().stream()
             .filter(e -> e.getValue().size() >= 2)
-            .map(e -> new DupGroupDTO(
-                e.getKey(),
-                e.getValue().size(),
-                e.getValue().stream().map(this::toDTO).collect(Collectors.toList())
-            ))
-            .sorted(Comparator.comparingInt(DupGroupDTO::count).reversed())
+            .map(e -> {
+                List<Order> sorted = e.getValue().stream()
+                    .sorted(Comparator.comparing(
+                        o -> o.getOrderedAt() != null ? o.getOrderedAt() : o.getCreatedAt(),
+                        Comparator.nullsLast(Comparator.reverseOrder())
+                    ))
+                    .collect(Collectors.toList());
+                return new DupGroupDTO(
+                    e.getKey(),
+                    sorted.stream().map(DupOrderDTO::new).collect(Collectors.toList())
+                );
+            })
+            .sorted(Comparator.comparingInt((DupGroupDTO g) -> g.count).reversed())
             .collect(Collectors.toList());
 
-        int dupOrderCount = dupGroups.stream().mapToInt(DupGroupDTO::count).sum();
-
-        log.info("중복 검사 완료: 전체 {}건, {}그룹 {}건 중복", orders.size(), dupGroups.size(), dupOrderCount);
-
-        return ResponseEntity.ok(new DupResultDTO(
-            orders.size(),
-            dupGroups.size(),
-            dupOrderCount,
-            dupGroups
-        ));
+        log.info("중복 검사 완료: 전체 {}건, {}그룹 중복", orders.size(), dupGroups.size());
+        return ResponseEntity.ok(new DupResultDTO(orders.size(), dupGroups));
     }
 
     /**
-     * 선택 주문 취소 처리
+     * 선택 주문 취소
      * POST /api/processing/duplicate/cancel
-     * Body: { "orderNos": ["OMS-...", "OMS-..."] }
+     * Body: { "orderNos": ["OMS-...", ...] }
      */
     @PostMapping("/cancel")
     @Transactional
@@ -133,23 +154,19 @@ public class DuplicateCheckController {
         for (String orderNo : orderNos) {
             Optional<Order> opt = orderRepository.findByOrderNo(orderNo);
             if (opt.isPresent()) {
-                opt.get().setOrderStatus("CANCELLED");
+                opt.get().setOrderStatus(Order.OrderStatus.CANCELLED);
                 orderRepository.save(opt.get());
                 cancelled++;
             }
         }
-
-        return ResponseEntity.ok(Map.of(
-            "success", true,
-            "cancelled", cancelled,
-            "message", cancelled + "건 취소 처리 완료"
-        ));
+        return ResponseEntity.ok(Map.of("success", true, "cancelled", cancelled,
+            "message", cancelled + "건 취소 완료"));
     }
 
     /**
-     * 각 그룹 최신 1건만 남기고 나머지 취소
+     * 각 그룹 최신 1건만 남기고 나머지 자동 취소
      * POST /api/processing/duplicate/keep-latest
-     * Body: { "criteria": "PHONE_SKU" }
+     * Body: { "criteria": "ORDER_NO" }
      */
     @PostMapping("/keep-latest")
     @Transactional
@@ -158,19 +175,17 @@ public class DuplicateCheckController {
     ) {
         Criteria criteria;
         try {
-            criteria = Criteria.valueOf(body.getOrDefault("criteria", "PHONE_SKU"));
+            criteria = Criteria.valueOf(body.getOrDefault("criteria", "ORDER_NO"));
         } catch (IllegalArgumentException e) {
-            criteria = Criteria.PHONE_SKU;
+            criteria = Criteria.PHONE_AMOUNT;
         }
-
         log.info("최신 1건 유지 처리: criteria={}", criteria);
 
         List<Order> orders = orderRepository.findAll().stream()
-            .filter(o -> !"CANCELLED".equals(o.getOrderStatus()))
+            .filter(o -> o.getOrderStatus() != Order.OrderStatus.CANCELLED)
             .collect(Collectors.toList());
 
         orders.forEach(o -> {
-            o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
@@ -184,70 +199,49 @@ public class DuplicateCheckController {
         int cancelled = 0;
         for (List<Order> group : grouped.values()) {
             if (group.size() < 2) continue;
-            // 가장 최근 주문 1건만 남기고 나머지 취소
+            // 최신순 정렬 후 첫 번째(최신)만 유지
             group.sort(Comparator.comparing(
                 o -> o.getOrderedAt() != null ? o.getOrderedAt() : o.getCreatedAt(),
                 Comparator.nullsLast(Comparator.reverseOrder())
             ));
             for (int i = 1; i < group.size(); i++) {
-                group.get(i).setOrderStatus("CANCELLED");
+                group.get(i).setOrderStatus(Order.OrderStatus.CANCELLED);
                 orderRepository.save(group.get(i));
                 cancelled++;
             }
         }
 
-        return ResponseEntity.ok(Map.of(
-            "success", true,
-            "cancelled", cancelled,
-            "message", cancelled + "건 취소 처리 완료 (각 그룹 최신 1건 유지)"
-        ));
+        return ResponseEntity.ok(Map.of("success", true, "cancelled", cancelled,
+            "message", cancelled + "건 취소 완료 (각 그룹 최신 1건 유지)"));
     }
 
-    // ─── 그룹핑 키 생성 ───────────────────────────────────────────
+    // ─── 그룹핑 키 생성 ──────────────────────────────────────────
     private String buildKey(Order o, Criteria criteria) {
-        String phone = normalize(o.getRecipientPhone());
-        String firstItemCode = o.getItems().isEmpty() ? "" :
-            normalize(o.getItems().get(0).getProductCode());
-        String firstItemName = o.getItems().isEmpty() ? "" :
-            normalize(o.getItems().get(0).getProductName());
+        String phone   = norm(o.getRecipientPhone());
+        String name    = norm(o.getRecipientName());
+        String chNo    = norm(o.getChannelOrderNo());
+        String orderNo = norm(o.getOrderNo());
 
+        // 상품명은 RawOrder 또는 channelOrderNo 기반으로 대용
+        // (OrderItem 엔티티 미확인 → channelOrderNo가 상품+주문 식별자 역할)
         return switch (criteria) {
-            case PHONE_SKU ->
-                phone + "|" + firstItemCode;
-            case PHONE_PRODUCT ->
-                phone + "|" + (firstItemName.length() > 10 ? firstItemName.substring(0, 10) : firstItemName);
-            case NAME_ADDRESS_SKU -> {
-                String addr = normalize(o.getAddress());
-                yield normalize(o.getRecipientName()) + "|" +
-                    (addr.length() > 15 ? addr.substring(0, 15) : addr) + "|" + firstItemCode;
+            case ORDER_NO -> {
+                // 쇼핑몰 주문번호 우선, 없으면 OMS 주문번호
+                String key = !chNo.isBlank() ? chNo : orderNo;
+                yield key.isBlank() ? "" : key;
             }
-            case ORDER_NO -> normalize(o.getOrderNo());
+            case NAME_PHONE_ITEM -> {
+                // 이름 + 연락처 + 첫 번째 상품명
+                String productName = o.getItems().isEmpty() ? "" :
+                    norm(o.getItems().get(0).getProductName());
+                if (name.isBlank() || phone.isBlank() || productName.isBlank()) yield "";
+                yield name + "|" + phone + "|" + productName;
+            }
         };
     }
 
-    private String normalize(String s) {
+    private String norm(String s) {
         if (s == null) return "";
         return s.replaceAll("[^\\w가-힣]", "").toLowerCase();
-    }
-
-    // ─── Order → DTO 변환 ─────────────────────────────────────────
-    private DupOrderDTO toDTO(Order o) {
-        String productName = o.getItems().isEmpty() ? "" : o.getItems().get(0).getProductName();
-        String productCode = o.getItems().isEmpty() ? "" : o.getItems().get(0).getProductCode();
-        int    quantity    = o.getItems().isEmpty() ? 0  : o.getItems().get(0).getQuantity();
-
-        return new DupOrderDTO(
-            o.getOrderId() != null ? o.getOrderId().toString() : "",
-            o.getOrderNo(),
-            o.getChannel() != null ? o.getChannel().getChannelName() : "",
-            o.getRecipientName(),
-            o.getRecipientPhone(),
-            o.getAddress(),
-            productName,
-            productCode,
-            quantity,
-            o.getOrderStatus(),
-            o.getOrderedAt() != null ? o.getOrderedAt().toString() : ""
-        );
     }
 }
