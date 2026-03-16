@@ -18,9 +18,10 @@ import java.util.stream.Collectors;
 /**
  * 재고 할당 컨트롤러
  *
- * GET  /api/allocation/preview        - 할당 미리보기 (차감 전 확인)
- * POST /api/allocation/allocate        - 실제 재고 차감
- * POST /api/allocation/release/{orderNo} - 할당 취소 (재고 복구)
+ * GET  /api/allocation/preview          - 할당 미리보기
+ * POST /api/allocation/allocate          - 재고 예약 (차감 아님)
+ * POST /api/allocation/release/{orderNo} - 할당 취소 (예약 해제)
+ * POST /api/allocation/confirm/{orderNo} - 검수발송 시 실제 차감 (검수발송 컨트롤러에서 호출)
  */
 @Slf4j
 @RestController
@@ -179,13 +180,10 @@ public class AllocationController {
                 if (product.getAvailableStock() < qty) { orderOk = false; continue; }
 
                 try {
-                    // 재고 차감 (outbound 처리)
-                    inventoryService.processOutboundWithWarehouse(
-                        product.getProductId(), qty, "AUTO", null,
-                        "주문 할당: " + o.getOrderNo()
-                    );
+                    // 재고 예약 (차감 아님 - 실제 차감은 검수발송 시)
+                    inventoryService.reserveStock(product.getProductId(), qty);
                 } catch (Exception e) {
-                    log.error("재고 차감 실패: {} - {}", o.getOrderNo(), e.getMessage());
+                    log.error("재고 예약 실패: {} - {}", o.getOrderNo(), e.getMessage());
                     orderOk = false;
                 }
             }
@@ -206,7 +204,7 @@ public class AllocationController {
             "allocated", allocated,
             "failed",    failed,
             "failedOrderNos", failedOrderNos,
-            "message",   allocated + "건 할당 완료" + (failed > 0 ? " (" + failed + "건 실패)" : "")
+            "message",   allocated + "건 재고 예약 완료 (검수발송 시 실제 차감)" + (failed > 0 ? " (" + failed + "건 실패)" : "")
         ));
     }
 
@@ -229,12 +227,10 @@ public class AllocationController {
             if (product == null) continue;
             int qty = item.getQuantity() != null ? item.getQuantity() : 0;
             try {
-                inventoryService.processInboundWithWarehouse(
-                    product.getProductId(), qty, "AUTO", null,
-                    "할당 취소 복구: " + orderNo
-                );
+                // 예약 해제 (차감된 게 아니므로 예약량만 복구)
+                inventoryService.releaseReservedStock(product.getProductId(), qty);
             } catch (Exception e) {
-                log.error("재고 복구 실패: {}", e.getMessage());
+                log.error("재고 예약 해제 실패: {}", e.getMessage());
             }
         }
 
@@ -258,4 +254,45 @@ public class AllocationController {
         }
         return null;
     }
+
+    /**
+     * 검수발송 시 실제 재고 차감
+     * POST /api/allocation/confirm/{orderNo}
+     * (검수발송 컨트롤러에서 호출)
+     */
+    @PostMapping("/confirm/{orderNo}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> confirmAndDeduct(@PathVariable String orderNo) {
+        log.info("재고 실차감 (검수발송): {}", orderNo);
+
+        Order order = orderRepository.findByOrderNo(orderNo)
+            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
+        order.getItems().size();
+
+        for (OrderItem item : order.getItems()) {
+            Product product = findProduct(item);
+            if (product == null) continue;
+            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            try {
+                // 예약 해제 후 실제 차감
+                inventoryService.releaseReservedStock(product.getProductId(), qty);
+                inventoryService.processOutboundWithWarehouse(
+                    product.getProductId(), qty, "AUTO", order.getOrderId(),
+                    "검수발송 출고: " + orderNo
+                );
+            } catch (Exception e) {
+                log.error("재고 실차감 실패: {} - {}", orderNo, e.getMessage());
+            }
+        }
+
+        order.setOrderStatus(Order.OrderStatus.SHIPPED);
+        orderRepository.save(order);
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "재고 차감 및 발송 처리 완료: " + orderNo
+        ));
+    }
+
 }
