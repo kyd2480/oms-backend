@@ -1,7 +1,10 @@
 package com.oms.collector.controller;
 
 import com.oms.collector.entity.Order;
+import com.oms.collector.entity.OrderItem;
+import com.oms.collector.entity.SalesChannel;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.SalesChannelRepository;
 import com.oms.collector.service.OrderProcessingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,8 +16,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 주문 처리 컨트롤러
@@ -30,6 +38,7 @@ public class ProcessingController {
 
     private final OrderProcessingService processingService;
     private final OrderRepository orderRepository;
+    private final SalesChannelRepository salesChannelRepository;
 
     /**
      * 미처리 주문 일괄 처리
@@ -182,4 +191,124 @@ public class ProcessingController {
             })
             .orElse(ResponseEntity.notFound().build());
     }
+
+    /**
+     * 수동 주문 저장 (직접입력 / CSV 업로드)
+     * POST /api/processing/orders
+     *
+     * Body: [{
+     *   orderNo, channel, receiverName, receiverPhone, address,
+     *   productName, sku, barcode, optionName, quantity, salePrice, memo
+     * }]
+     */
+    @PostMapping("/orders")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> saveManualOrders(
+        @RequestBody List<Map<String, Object>> orderList
+    ) {
+        log.info("수동 주문 저장 요청: {}건", orderList.size());
+
+        // DIRECT 채널 조회 (없으면 null 허용)
+        SalesChannel directChannel = null;
+        try {
+            directChannel = salesChannelRepository.findByChannelCode("DIRECT").orElse(null);
+        } catch (Exception ignored) {}
+
+        int saved = 0;
+        int skipped = 0;
+
+        for (Map<String, Object> raw : orderList) {
+            try {
+                String orderNo = (String) raw.get("orderNo");
+
+                // 중복 주문번호 스킵
+                if (orderNo != null && orderRepository.findByOrderNo(orderNo).isPresent()) {
+                    skipped++;
+                    continue;
+                }
+
+                // orderNo 없으면 자동 생성
+                if (orderNo == null || orderNo.isBlank()) {
+                    orderNo = "MANUAL-" + LocalDateTime.now()
+                        .format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
+                        + "-" + (saved + 1);
+                }
+
+                // 채널 결정
+                SalesChannel channel = directChannel;
+                String channelCode = (String) raw.get("channel");
+                if (channelCode != null && !channelCode.isBlank()
+                        && !"직접입력".equals(channelCode)) {
+                    try {
+                        channel = salesChannelRepository
+                            .findByChannelCode(channelCode).orElse(directChannel);
+                    } catch (Exception ignored) {}
+                }
+
+                // 금액
+                BigDecimal salePrice = BigDecimal.ZERO;
+                Object priceObj = raw.get("salePrice");
+                if (priceObj != null) {
+                    try { salePrice = new BigDecimal(priceObj.toString()); }
+                    catch (Exception ignored) {}
+                }
+
+                // 수량
+                int quantity = 1;
+                Object qtyObj = raw.get("quantity");
+                if (qtyObj != null) {
+                    try { quantity = Integer.parseInt(qtyObj.toString()); }
+                    catch (Exception ignored) {}
+                }
+
+                // Order 생성
+                Order order = Order.builder()
+                    .orderNo(orderNo)
+                    .channel(channel)
+                    .channelOrderNo(orderNo)
+                    .customerName((String) raw.getOrDefault("receiverName", ""))
+                    .customerPhone((String) raw.getOrDefault("receiverPhone", ""))
+                    .recipientName((String) raw.getOrDefault("receiverName", ""))
+                    .recipientPhone((String) raw.getOrDefault("receiverPhone", ""))
+                    .address((String) raw.getOrDefault("address", ""))
+                    .totalAmount(salePrice.multiply(BigDecimal.valueOf(quantity)))
+                    .paymentAmount(salePrice.multiply(BigDecimal.valueOf(quantity)))
+                    .orderStatus(Order.OrderStatus.PENDING)
+                    .paymentStatus(Order.PaymentStatus.PENDING)
+                    .orderedAt(LocalDateTime.now())
+                    .build();
+
+                // OrderItem 생성
+                String productName = (String) raw.getOrDefault("productName", "");
+                if (!productName.isBlank()) {
+                    OrderItem item = OrderItem.builder()
+                        .productCode((String) raw.getOrDefault("sku", ""))
+                        .channelProductCode((String) raw.getOrDefault("barcode", ""))
+                        .productName(productName)
+                        .optionName((String) raw.getOrDefault("optionName", ""))
+                        .quantity(quantity)
+                        .unitPrice(salePrice)
+                        .totalPrice(salePrice.multiply(BigDecimal.valueOf(quantity)))
+                        .build();
+                    order.addItem(item);
+                }
+
+                orderRepository.save(order);
+                saved++;
+
+            } catch (Exception e) {
+                log.error("수동 주문 저장 실패: {}", e.getMessage());
+                skipped++;
+            }
+        }
+
+        log.info("수동 주문 저장 완료: {}건 저장, {}건 스킵", saved, skipped);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "saved", saved,
+            "skipped", skipped,
+            "message", saved + "건 저장 완료" + (skipped > 0 ? " (" + skipped + "건 스킵)" : "")
+        ));
+    }
+
 }
