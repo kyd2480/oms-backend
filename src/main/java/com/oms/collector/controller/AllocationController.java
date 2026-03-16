@@ -101,11 +101,10 @@ public class AllocationController {
     public ResponseEntity<PreviewResultDTO> preview() {
         log.info("재고 할당 미리보기");
 
-        // PENDING / CONFIRMED 상태 주문만 대상
-        List<Order> orders = orderRepository.findAll().stream()
-            .filter(o -> o.getOrderStatus() == Order.OrderStatus.PENDING
-                      || o.getOrderStatus() == Order.OrderStatus.CONFIRMED)
-            .collect(Collectors.toList());
+        // PENDING / CONFIRMED 상태 주문만 직접 조회 (findAll 대신)
+        List<Order> orders = new ArrayList<>();
+        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.PENDING));
+        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.CONFIRMED));
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -154,10 +153,9 @@ public class AllocationController {
 
         List<Order> orders;
         if (allocateAll) {
-            orders = orderRepository.findAll().stream()
-                .filter(o -> o.getOrderStatus() == Order.OrderStatus.PENDING
-                          || o.getOrderStatus() == Order.OrderStatus.CONFIRMED)
-                .collect(Collectors.toList());
+            orders = new ArrayList<>();
+            orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.PENDING));
+            orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.CONFIRMED));
         } else {
             orders = targetOrderNos.stream()
                 .map(no -> orderRepository.findByOrderNo(no).orElse(null))
