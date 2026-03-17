@@ -2,9 +2,12 @@ package com.oms.collector.controller;
 
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
+import com.oms.collector.entity.Product;
 import com.oms.collector.entity.SalesChannel;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.repository.SalesChannelRepository;
+import com.oms.collector.service.InventoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
@@ -35,6 +38,8 @@ public class TestDataController {
 
     private final OrderRepository       orderRepository;
     private final SalesChannelRepository salesChannelRepository;
+    private final ProductRepository     productRepository;
+    private final InventoryService      inventoryService;
 
     /**
      * 테스트 주문 삽입
@@ -168,4 +173,146 @@ public class TestDataController {
             .findFirst()
             .orElse(null);
     }
+}
+
+    /**
+     * 주문 아이템 샘플 조회 (데이터 구조 확인용)
+     * GET /api/test/orders/sample
+     */
+    @GetMapping("/orders/sample")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> sampleOrders() {
+        Pageable p = org.springframework.data.domain.PageRequest.of(0, 10,
+            org.springframework.data.domain.Sort.by("orderedAt").descending());
+        var orders = orderRepository.findAll(p).getContent();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (var o : orders) {
+            o.getItems().size();
+            for (var item : o.getItems()) {
+                result.add(Map.of(
+                    "orderNo",            o.getOrderNo(),
+                    "productName",        item.getProductName() != null ? item.getProductName() : "",
+                    "productCode",        item.getProductCode() != null ? item.getProductCode() : "(없음)",
+                    "channelProductCode", item.getChannelProductCode() != null ? item.getChannelProductCode() : "(없음)",
+                    "optionName",         item.getOptionName() != null ? item.getOptionName() : ""
+                ));
+            }
+        }
+        return ResponseEntity.ok(result);
+    
+    /**
+     * 쇼핑몰 상품코드로 잘못 저장된 product_code 초기화
+     * PATCH /api/test/orders/fix-product-codes
+     * 
+     * 11ST-PRD-xxx, NAVER-PRD-xxx, CP-PRD-xxx 패턴을 null로 초기화
+     * → 상품명 매칭 탭에서 정상 매칭 가능하게 됨
+     */
+    @PatchMapping("/orders/fix-product-codes")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> fixProductCodes() {
+        log.info("⚠️ 쇼핑몰 상품코드 → product_code 초기화");
+
+        List<Order> orders = orderRepository.findAll();
+        int fixed = 0;
+
+        for (Order order : orders) {
+            order.getItems().size();
+            boolean changed = false;
+            for (var item : order.getItems()) {
+                String code = item.getProductCode();
+                if (code != null && code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*")) {
+                    // channelProductCode로 이동 후 productCode 초기화
+                    item.setChannelProductCode(code);
+                    item.setProductCode(null);
+                    changed = true;
+                    fixed++;
+                }
+            }
+            if (changed) orderRepository.save(order);
+        }
+
+        log.info("product_code 초기화 완료: {}건", fixed);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "fixed",   fixed,
+            "message", fixed + "건 초기화 완료 (쇼핑몰 상품코드 → channelProductCode 이동)"
+        ));
+    }
+
+
+    /**
+     * CSV 재고 데이터 일괄 입고
+     * POST /api/test/stock/inbound
+     *
+     * Body: [{
+     *   barcode, productName, optionName,
+     *   stockAnyang, stockIcheon, stockBucheon
+     * }]
+     * 
+     * ⚠️ 실제 운영 시 이 API 삭제 후 정식 입고 프로세스 사용
+     */
+    @PostMapping("/stock/inbound")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> inboundStock(
+        @RequestBody List<Map<String, Object>> stockList
+    ) {
+        log.info("⚠️ CSV 재고 일괄 입고: {}개 항목", stockList.size());
+
+        int updated = 0;
+        int notFound = 0;
+
+        for (Map<String, Object> item : stockList) {
+            String barcode = (String) item.get("barcode");
+            if (barcode == null || barcode.isBlank()) continue;
+
+            int stockAnyang  = toInt(item.get("stockAnyang"));
+            int stockIcheon  = toInt(item.get("stockIcheon"));
+            int stockBucheon = toInt(item.get("stockBucheon"));
+
+            // 바코드/SKU로 상품 검색
+            List<Product> found = productRepository.searchProducts(barcode);
+            Product product = found.stream()
+                .filter(p -> barcode.equalsIgnoreCase(p.getSku())
+                          || barcode.equalsIgnoreCase(p.getBarcode()))
+                .findFirst().orElse(null);
+
+            if (product == null) {
+                notFound++;
+                continue;
+            }
+
+            // 창고별 재고 직접 설정 (기존 재고 덮어쓰기)
+            if (stockAnyang > 0) {
+                product.setWarehouseStockAnyang(stockAnyang);
+                product.increaseStock(stockAnyang);
+            }
+            if (stockIcheon > 0) {
+                product.setWarehouseStockIcheon(stockIcheon);
+                product.increaseStock(stockIcheon);
+            }
+            if (stockBucheon > 0) {
+                product.setWarehouseStockBucheon(stockBucheon);
+                product.increaseStock(stockBucheon);
+            }
+
+            productRepository.save(product);
+            updated++;
+        }
+
+        log.info("재고 입고 완료: {}개 업데이트, {}개 미발견", updated, notFound);
+        return ResponseEntity.ok(Map.of(
+            "success",  true,
+            "updated",  updated,
+            "notFound", notFound,
+            "message",  updated + "개 상품 재고 입고 완료 (" + notFound + "개 미발견)"
+        ));
+    }
+
+    private int toInt(Object obj) {
+        if (obj == null) return 0;
+        try { return Integer.parseInt(obj.toString()); }
+        catch (Exception e) { return 0; }
+    }
+
+
 }

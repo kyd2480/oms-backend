@@ -42,9 +42,10 @@ public class ProductMapper {
         String productCode = PRODUCT_MAPPING.get(channelProductCode);
         
         if (productCode == null) {
-            // 매핑이 없으면 원본 반환
-            log.debug("⚠️ 상품 매핑 없음: {} (원본 사용)", channelProductCode);
-            return channelProductCode;
+            // 매핑이 없으면 null 반환 → OrderNormalizer에서 productCode 비워둠
+            // → 상품명 매칭(NameMatchingController)에서 유사도로 매칭
+            log.debug("⚠️ 상품 매핑 없음: {} (null 반환 → 상품명 매칭 위임)", channelProductCode);
+            return null;
         }
         
         log.debug("✅ 상품 매핑: {} → {}", channelProductCode, productCode);
