@@ -258,4 +258,25 @@ public class TestDataController {
     }
 
 
+
+    /**
+     * 전체 주문 삭제 (orders 테이블 전체)
+     * DELETE /api/test/orders/clear-all
+     * ⚠️ 복구 불가 - 테스트 환경에서만 사용
+     */
+    @DeleteMapping("/orders/clear-all")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> clearAllOrders() {
+        log.info("⚠️ 전체 주문 삭제 시작");
+        long count = orderRepository.count();
+        orderRepository.deleteAll();
+        log.info("전체 주문 {}건 삭제 완료", count);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "deleted", count,
+            "message", count + "건 전체 삭제 완료"
+        ));
+    }
+
+
 }
