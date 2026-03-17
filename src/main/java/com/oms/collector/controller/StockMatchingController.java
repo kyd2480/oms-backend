@@ -50,6 +50,7 @@ public class StockMatchingController {
         public int    warehouseStock;
         public int    allocatable;
         public String shipStatus;  // FULL / PARTIAL / IMPOSSIBLE / NOT_MATCHED
+        public String address;
         public String orderedAt;
 
         public MatchItemDTO(Order o, OrderItem item, Product product, int stock) {
@@ -119,8 +120,8 @@ public class StockMatchingController {
             Sort.by(Sort.Direction.DESC, "orderedAt"));
 
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING,   pageable).getContent());
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent());
+        // 매칭 탭 = PENDING만 (CONFIRMED는 할당완료 탭에서 별도 조회)
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable).getContent());
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -218,13 +219,71 @@ public class StockMatchingController {
 
     // ─── 헬퍼 ────────────────────────────────────────────────────
 
+    // 쇼핑몰 상품코드 패턴 (11ST-PRD-xxx, NAVER-PRD-xxx, CP-PRD-xxx 등)
+    private boolean isChannelProductCode(String code) {
+        if (code == null) return false;
+        return code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*");
+    }
+
     private Product findProduct(OrderItem item) {
-        if (item.getProductCode() == null || item.getProductCode().isBlank()) return null;
-        List<Product> found = productRepository.searchProducts(item.getProductCode());
-        return found.stream()
-            .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
-                      || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
+        String code = item.getProductCode();
+
+        // productCode가 없거나 쇼핑몰 상품코드면 → 상품명으로 유사도 검색
+        if (code == null || code.isBlank() || isChannelProductCode(code)) {
+            return findBestMatchByName(item.getProductName());
+        }
+
+        // 바코드/SKU로 직접 검색
+        List<Product> found = productRepository.searchProducts(code);
+        Product exact = found.stream()
+            .filter(p -> code.equalsIgnoreCase(p.getSku())
+                      || code.equalsIgnoreCase(p.getBarcode()))
             .findFirst().orElse(null);
+
+        // 정확히 못 찾으면 상품명으로 fallback
+        return exact != null ? exact : findBestMatchByName(item.getProductName());
+    }
+
+    private Product findBestMatchByName(String productName) {
+        if (productName == null || productName.isBlank()) return null;
+
+        // 상품코드 부분 추출 (첫 토큰 - 공백 전)
+        String keyword = productName.split(" ")[0];
+        if (keyword.length() > 12) keyword = keyword.substring(0, 12);
+
+        List<Product> candidates = productRepository.searchProducts(keyword);
+
+        // 후보 없으면 앞 8자로 재검색
+        if (candidates.isEmpty()) {
+            String fallback = productName.length() > 8 ? productName.substring(0, 8) : productName;
+            candidates = productRepository.searchProducts(fallback);
+        }
+
+        if (candidates.isEmpty()) return null;
+
+        // Jaccard 유사도로 최적 선택 (0.3 이상)
+        final String pName = productName;
+        return candidates.stream()
+            .max(java.util.Comparator.comparingDouble(p -> jaccardSimilarity(pName, p.getProductName())))
+            .filter(p -> jaccardSimilarity(pName, p.getProductName()) >= 0.3)
+            .orElse(null);
+    }
+
+    private double jaccardSimilarity(String a, String b) {
+        if (a == null || b == null) return 0.0;
+        Set<String> ta = tokenize(a);
+        Set<String> tb = tokenize(b);
+        if (ta.isEmpty() || tb.isEmpty()) return 0.0;
+        Set<String> inter = new HashSet<>(ta);
+        inter.retainAll(tb);
+        Set<String> union = new HashSet<>(ta);
+        union.addAll(tb);
+        return (double) inter.size() / union.size();
+    }
+
+    private Set<String> tokenize(String s) {
+        String n = s.replaceAll("[/\\\\|·•\\-_]", " ").replaceAll("\\s+", " ").trim().toLowerCase();
+        return new HashSet<>(java.util.Arrays.asList(n.split(" ")));
     }
 
     private int getWarehouseStock(Product product, String warehouseCode) {
@@ -236,4 +295,74 @@ public class StockMatchingController {
             default        -> product.getAvailableStock();
         };
     }
+
+    /**
+     * 할당 완료 목록 조회 (CONFIRMED 상태)
+     * GET /api/stock-matching/allocated?warehouseCode=ANYANG
+     */
+    @GetMapping("/allocated")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<MatchItemDTO>> getAllocated(
+        @RequestParam(defaultValue = "")    String warehouseCode,
+        @RequestParam(defaultValue = "0")   int page,
+        @RequestParam(defaultValue = "200") int size
+    ) {
+        log.info("할당 완료 목록 조회: warehouse={}", warehouseCode);
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
+            Sort.by(Sort.Direction.DESC, "orderedAt"));
+
+        List<Order> orders = orderRepository
+            .findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent();
+
+        orders.forEach(o -> {
+            o.getItems().size();
+            if (o.getChannel() != null) o.getChannel().getChannelName();
+        });
+
+        List<MatchItemDTO> items = new ArrayList<>();
+        for (Order o : orders) {
+            for (OrderItem item : o.getItems()) {
+                Product product = findProduct(item);
+                int stock = warehouseCode.isBlank() ? 0 : getWarehouseStock(product, warehouseCode);
+                MatchItemDTO dto = new MatchItemDTO(o, item, product, stock);
+                dto.shipStatus = "ALLOCATED"; // 할당완료 상태 표시
+                items.add(dto);
+            }
+        }
+
+        return ResponseEntity.ok(items);
+    }
+
+    /**
+     * 할당 취소 (CONFIRMED → PENDING, 예약 해제)
+     * POST /api/stock-matching/cancel-reserve/{orderNo}
+     */
+    @PostMapping("/cancel-reserve/{orderNo}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> cancelReserve(@PathVariable String orderNo) {
+        log.info("할당 취소: {}", orderNo);
+
+        Order order = orderRepository.findByOrderNo(orderNo)
+            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
+        order.getItems().size();
+
+        for (OrderItem item : order.getItems()) {
+            Product product = findProduct(item);
+            if (product == null) continue;
+            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            try {
+                inventoryService.releaseReservedStock(product.getProductId(), qty);
+            } catch (Exception e) {
+                log.warn("예약 해제 실패 (무시): {} - {}", orderNo, e.getMessage());
+            }
+        }
+
+        order.setOrderStatus(Order.OrderStatus.PENDING);
+        orderRepository.save(order);
+
+        return ResponseEntity.ok(Map.of("success", true, "message", "할당 취소 완료: " + orderNo));
+    }
+
 }
