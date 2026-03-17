@@ -291,7 +291,7 @@ public class Mock11StCollector implements OrderCollector {
             .address(addresses[random.nextInt(addresses.length)])
             .addressDetail((random.nextInt(20) + 1) + "층 " + (random.nextInt(10) + 1) + "호")
             .deliveryMemo("부재시 문앞에 놓아주세요")
-            .status("PAYED")
+            .status("PENDING")
             .paymentStatus("PAID")
             .paymentMethod("CARD")
             .orderedAt(LocalDateTime.now().minusHours(random.nextInt(24)))

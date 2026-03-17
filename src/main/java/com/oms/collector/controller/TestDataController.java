@@ -269,13 +269,53 @@ public class TestDataController {
     public ResponseEntity<Map<String, Object>> clearAllOrders() {
         log.info("⚠️ 전체 주문 삭제 시작");
         long count = orderRepository.count();
-        orderRepository.deleteAll();
+
+        // items 먼저 로드 후 삭제 (cascade 보장)
+        List<Order> all = orderRepository.findAll();
+        all.forEach(o -> o.getItems().size()); // lazy load
+        orderRepository.deleteAllInBatch(all);
+
         log.info("전체 주문 {}건 삭제 완료", count);
         return ResponseEntity.ok(Map.of(
             "success", true,
             "deleted", count,
             "message", count + "건 전체 삭제 완료"
         ));
+    }
+
+
+
+    /**
+     * 잘못 CONFIRMED된 주문을 PENDING으로 복구
+     * PATCH /api/test/orders/reset-status
+     * deliveryMemo에 INVOICE: 없는 CONFIRMED 주문 → PENDING으로 변경
+     */
+    @PatchMapping("/orders/reset-status")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> resetStatus() {
+        log.info("⚠️ CONFIRMED 주문 PENDING 복구 시작");
+        int fixed = 0;
+        int page  = 0;
+        while (true) {
+            var p = org.springframework.data.domain.PageRequest.of(page++, 500);
+            var orders = orderRepository.findAll(p);
+            if (orders.isEmpty()) break;
+            for (Order order : orders) {
+                if (order.getOrderStatus() == Order.OrderStatus.CONFIRMED) {
+                    // 송장번호 없는 CONFIRMED → PENDING으로 복구
+                    String memo = order.getDeliveryMemo();
+                    if (memo == null || !memo.startsWith("INVOICE:")) {
+                        order.setOrderStatus(Order.OrderStatus.PENDING);
+                        orderRepository.save(order);
+                        fixed++;
+                    }
+                }
+            }
+            if (!orders.hasNext()) break;
+        }
+        log.info("PENDING 복구 완료: {}건", fixed);
+        return ResponseEntity.ok(Map.of("success", true, "fixed", fixed,
+            "message", fixed + "건 PENDING으로 복구 완료"));
     }
 
 

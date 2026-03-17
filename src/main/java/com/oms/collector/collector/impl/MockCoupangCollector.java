@@ -293,7 +293,7 @@ public class MockCoupangCollector implements OrderCollector {
             .address("경기도 성남시 분당구 쿠팡로 " + (random.nextInt(500) + 1))
             .addressDetail(random.nextInt(10) + "동 " + random.nextInt(1000) + "호")
             .deliveryMemo("로켓배송 부탁드립니다")
-            .status("PAYED")
+            .status("PENDING")
             .paymentStatus("PAID")
             .paymentMethod("CARD")
             .orderedAt(LocalDateTime.now().minusHours(random.nextInt(24)))

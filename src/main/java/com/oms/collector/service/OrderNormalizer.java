@@ -168,7 +168,8 @@ public class OrderNormalizer {
         
         return switch (channelStatus.toUpperCase()) {
             case "PAYMENT_WAITING", "PENDING" -> Order.OrderStatus.PENDING;
-            case "PAYED", "PAID", "PRODUCT_PREPARE", "CONFIRMED" -> Order.OrderStatus.CONFIRMED;
+            case "PRODUCT_PREPARE", "CONFIRMED" -> Order.OrderStatus.CONFIRMED;
+            case "PAYED", "PAID" -> Order.OrderStatus.PENDING; // 결제완료 = 주문접수(PENDING), 재고할당은 별도
             case "DELIVERING", "SHIPPING" -> Order.OrderStatus.SHIPPED;
             case "DELIVERED", "COMPLETE" -> Order.OrderStatus.DELIVERED;
             case "CANCELED", "CANCELLED" -> Order.OrderStatus.CANCELLED;

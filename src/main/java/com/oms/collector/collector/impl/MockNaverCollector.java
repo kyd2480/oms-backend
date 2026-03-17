@@ -308,7 +308,7 @@ public class MockNaverCollector implements OrderCollector {
             .address(generateRandomAddress())
             .addressDetail(random.nextInt(10) + "동 " + random.nextInt(1000) + "호")
             .deliveryMemo("문 앞에 놓아주세요")
-            .status("PAYED")
+            .status("PENDING")
             .paymentStatus("PAID")
             .paymentMethod("CARD")
             .orderedAt(LocalDateTime.now().minusHours(random.nextInt(24)))
