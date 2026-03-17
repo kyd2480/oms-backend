@@ -6,6 +6,9 @@ import com.oms.collector.entity.Product;
 import com.oms.collector.entity.ProductMatchingRule;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductMatchingRuleRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import com.oms.collector.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -90,68 +93,87 @@ public class NameMatchingController {
      */
     @GetMapping("/unmatched")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<UnmatchedItemDTO>> getUnmatched() {
-        log.info("미매칭 주문상품 조회");
+    public ResponseEntity<List<UnmatchedItemDTO>> getUnmatched(
+        @RequestParam(defaultValue = "0")   int page,
+        @RequestParam(defaultValue = "200") int size
+    ) {
+        log.info("미매칭 주문상품 조회 (page={}, size={})", page, size);
+
+        // 최대 100건씩 페이지로 조회 (타임아웃 방지)
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
+            Sort.by(Sort.Direction.DESC, "orderedAt"));
 
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.PENDING));
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.CONFIRMED));
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable).getContent());
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent());
 
         orders.forEach(o -> {
             o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        // 매칭 룰 전체 캐싱 (건별 DB 조회 방지)
+        Map<String, ProductMatchingRule> ruleCache = new HashMap<>();
+        ruleRepository.findAllByOrderByCreatedAtDesc()
+            .forEach(r -> ruleCache.put(r.getChannelProductName(), r));
+
         List<UnmatchedItemDTO> result = new ArrayList<>();
 
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
-                // productCode가 없거나 재고DB에서 찾지 못하는 것만
-                if (!isMatched(item)) {
-                    UnmatchedItemDTO dto = new UnmatchedItemDTO(o, item);
+                if (isMatchedFast(item, ruleCache)) continue;
 
-                    // [1] 바코드로 직접 추천
-                    if (item.getProductCode() != null && !item.getProductCode().isBlank()) {
-                        List<Product> byBarcode = productRepository.searchProducts(item.getProductCode());
-                        Product exact = byBarcode.stream()
-                            .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
-                                      || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
-                            .findFirst().orElse(null);
-                        if (exact != null) {
-                            dto.suggestedProductId   = exact.getProductId().toString();
-                            dto.suggestedProductName = exact.getProductName();
-                            dto.suggestedSku         = exact.getSku();
-                            dto.matchStatus          = "AUTO_SUGGESTED";
-                        }
-                    }
-                    // [2] 기존 룰에서 추천
-                    if (!"AUTO_SUGGESTED".equals(dto.matchStatus)) {
-                        ruleRepository.findByChannelProductName(item.getProductName())
-                            .ifPresent(rule -> {
-                                dto.suggestedProductId   = rule.getProductId().toString();
-                                dto.suggestedProductName = rule.getProductName();
-                                dto.suggestedSku         = rule.getSku();
-                                dto.matchStatus          = "AUTO_SUGGESTED";
-                            });
-                    }
-                    // [3] 유사도 기반 추천
-                    if (!"AUTO_SUGGESTED".equals(dto.matchStatus)) {
-                        Product similar = findBestMatch(item.getProductName());
-                        if (similar != null) {
-                            dto.suggestedProductId   = similar.getProductId().toString();
-                            dto.suggestedProductName = similar.getProductName();
-                            dto.suggestedSku         = similar.getSku();
-                            dto.matchStatus          = "AUTO_SUGGESTED";
-                        }
-                    }
+                UnmatchedItemDTO dto = new UnmatchedItemDTO(o, item);
 
-                    result.add(dto);
+                // [1] 바코드 직접 추천
+                if (item.getProductCode() != null && !item.getProductCode().isBlank()) {
+                    List<Product> byBarcode = productRepository.searchProducts(item.getProductCode());
+                    Product exact = byBarcode.stream()
+                        .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
+                                  || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
+                        .findFirst().orElse(null);
+                    if (exact != null) {
+                        dto.suggestedProductId   = exact.getProductId().toString();
+                        dto.suggestedProductName = exact.getProductName();
+                        dto.suggestedSku         = exact.getSku();
+                        dto.matchStatus          = "AUTO_SUGGESTED";
+                    }
                 }
+                // [2] 룰 캐시에서 추천
+                if (!"AUTO_SUGGESTED".equals(dto.matchStatus)) {
+                    ProductMatchingRule rule = ruleCache.get(item.getProductName());
+                    if (rule != null) {
+                        dto.suggestedProductId   = rule.getProductId().toString();
+                        dto.suggestedProductName = rule.getProductName();
+                        dto.suggestedSku         = rule.getSku();
+                        dto.matchStatus          = "AUTO_SUGGESTED";
+                    }
+                }
+                // [3] 유사도 추천 (바코드/룰 모두 실패 시만)
+                if (!"AUTO_SUGGESTED".equals(dto.matchStatus)) {
+                    Product similar = findBestMatch(item.getProductName());
+                    if (similar != null) {
+                        dto.suggestedProductId   = similar.getProductId().toString();
+                        dto.suggestedProductName = similar.getProductName();
+                        dto.suggestedSku         = similar.getSku();
+                        dto.matchStatus          = "AUTO_SUGGESTED";
+                    }
+                }
+
+                result.add(dto);
             }
         }
 
         log.info("미매칭 항목: {}건", result.size());
         return ResponseEntity.ok(result);
+    }
+
+    // 룰 캐시 사용하는 빠른 매칭 확인
+    private boolean isMatchedFast(OrderItem item, Map<String, ProductMatchingRule> ruleCache) {
+        if (item.getProductCode() == null || item.getProductCode().isBlank()) {
+            return ruleCache.containsKey(item.getProductName());
+        }
+        return !productRepository.searchProducts(item.getProductCode()).isEmpty();
     }
 
     /**
@@ -216,9 +238,10 @@ public class NameMatchingController {
     public ResponseEntity<Map<String, Object>> autoMatch() {
         log.info("자동매칭 실행");
 
+        Pageable all = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.PENDING));
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.CONFIRMED));
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, all).getContent());
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, all).getContent());
         orders.forEach(o -> o.getItems().size());
 
         int matched = 0;
@@ -333,9 +356,10 @@ public class NameMatchingController {
 
     private void updateOrderItemProductCode(String itemId, Product product) {
         // 모든 PENDING/CONFIRMED 주문에서 해당 itemId 찾아 업데이트
+        Pageable all = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.PENDING));
-        orders.addAll(orderRepository.findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus.CONFIRMED));
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, all).getContent());
+        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, all).getContent());
 
         for (Order o : orders) {
             o.getItems().size();

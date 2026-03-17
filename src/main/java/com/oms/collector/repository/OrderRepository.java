@@ -2,6 +2,8 @@ package com.oms.collector.repository;
 
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.SalesChannel;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -37,6 +39,11 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * 상태별 주문 조회
      */
     List<Order> findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus status);
+
+    /**
+     * 상태별 주문 조회 (페이지네이션)
+     */
+    Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
     
     /**
      * 기간별 주문 조회
