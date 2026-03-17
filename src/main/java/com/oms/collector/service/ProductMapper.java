@@ -38,12 +38,17 @@ public class ProductMapper {
         if (channelProductCode == null || channelProductCode.isEmpty()) {
             return null;
         }
+
+        // 바코드 패턴 (영문+숫자 조합, 쇼핑몰 코드 아님) → 그대로 사용
+        if (!channelProductCode.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*")) {
+            log.debug("✅ 바코드 직접 사용: {}", channelProductCode);
+            return channelProductCode;
+        }
         
         String productCode = PRODUCT_MAPPING.get(channelProductCode);
         
         if (productCode == null) {
-            // 매핑이 없으면 null 반환 → OrderNormalizer에서 productCode 비워둠
-            // → 상품명 매칭(NameMatchingController)에서 유사도로 매칭
+            // 쇼핑몰 코드인데 매핑 없음 → null 반환 (상품명 매칭 위임)
             log.debug("⚠️ 상품 매핑 없음: {} (null 반환 → 상품명 매칭 위임)", channelProductCode);
             return null;
         }
