@@ -84,6 +84,7 @@ public class StockMatchingController {
         public String warehouseCode;
         public String warehouseName;
         public int    totalItems;
+        public int    totalOrders;
         public int    full;
         public int    partial;
         public int    impossible;
@@ -95,6 +96,7 @@ public class StockMatchingController {
             this.warehouseName = name;
             this.items         = items;
             this.totalItems    = items.size();
+            this.totalOrders   = (int) items.stream().map(i -> i.orderNo).distinct().count();
             this.full          = (int) items.stream().filter(i -> "FULL".equals(i.shipStatus)).count();
             this.partial       = (int) items.stream().filter(i -> "PARTIAL".equals(i.shipStatus)).count();
             this.impossible    = (int) items.stream().filter(i -> "IMPOSSIBLE".equals(i.shipStatus)).count();
@@ -116,12 +118,16 @@ public class StockMatchingController {
     ) {
         log.info("재고 매칭: warehouse={}", warehouseCode);
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
-            Sort.by(Sort.Direction.DESC, "orderedAt"));
-
         List<Order> orders = new ArrayList<>();
         // 매칭 탭 = PENDING만 (CONFIRMED는 할당완료 탭에서 별도 조회)
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable).getContent());
+        // 전체 조회 (페이지네이션 제거 - 건수 제한 없이 전체 처리)
+        int p = 0;
+        while (true) {
+            Pageable pageable = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var slice = orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable);
+            orders.addAll(slice.getContent());
+            if (!slice.hasNext()) break;
+        }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -309,11 +315,14 @@ public class StockMatchingController {
     ) {
         log.info("할당 완료 목록 조회: warehouse={}", warehouseCode);
 
-        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
-            Sort.by(Sort.Direction.DESC, "orderedAt"));
-
-        List<Order> orders = orderRepository
-            .findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent();
+        List<Order> orders = new ArrayList<>();
+        int p2 = 0;
+        while (true) {
+            Pageable pageable = PageRequest.of(p2++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var slice = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable);
+            orders.addAll(slice.getContent());
+            if (!slice.hasNext()) break;
+        }
 
         orders.forEach(o -> {
             o.getItems().size();

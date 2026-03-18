@@ -112,11 +112,11 @@ public class InvoiceController {
         @RequestParam(defaultValue = "0")   int page,
         @RequestParam(defaultValue = "200") int size
     ) {
-        var pageable = PageRequest.of(page, Math.min(size, 200),
-            Sort.by(Sort.Direction.DESC, "orderedAt"));
-
-        List<Order> orders = orderRepository
-            .findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent();
+        List<Order> orders = new ArrayList<>();
+        { int p = 0; while(true) {
+            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -207,11 +207,11 @@ public class InvoiceController {
         @RequestParam(defaultValue = "0")   int page,
         @RequestParam(defaultValue = "200") int size
     ) {
-        var pageable = PageRequest.of(page, Math.min(size, 200),
-            Sort.by(Sort.Direction.DESC, "orderedAt"));
-
-        List<Order> orders = orderRepository
-            .findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent();
+        List<Order> orders = new ArrayList<>();
+        { int p = 0; while(true) {
+            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -273,8 +273,11 @@ public class InvoiceController {
         String carrierCode = body.getOrDefault("carrierCode", "POST");
         String carrierName = body.getOrDefault("carrierName", "우체국택배");
 
-        var pageable = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-        List<Order> orders = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent();
+        List<Order> orders = new ArrayList<>();
+        { int p = 0; while(true) {
+            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
         orders.forEach(o -> o.getItems().size());
 
         int assigned = 0;

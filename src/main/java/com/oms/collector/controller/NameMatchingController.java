@@ -99,13 +99,14 @@ public class NameMatchingController {
     ) {
         log.info("미매칭 주문상품 조회 (page={}, size={})", page, size);
 
-        // 최대 100건씩 페이지로 조회 (타임아웃 방지)
-        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
-            Sort.by(Sort.Direction.DESC, "orderedAt"));
-
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable).getContent());
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable).getContent());
+        for (Order.OrderStatus st : new Order.OrderStatus[]{Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED}) {
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(st, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -168,12 +169,21 @@ public class NameMatchingController {
         return ResponseEntity.ok(result);
     }
 
+    // 쇼핑몰 상품코드 패턴 감지
+    private boolean isChannelProductCode(String code) {
+        if (code == null) return false;
+        return code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*");
+    }
+
     // 룰 캐시 사용하는 빠른 매칭 확인
     private boolean isMatchedFast(OrderItem item, Map<String, ProductMatchingRule> ruleCache) {
-        if (item.getProductCode() == null || item.getProductCode().isBlank()) {
-            return ruleCache.containsKey(item.getProductName());
-        }
-        return !productRepository.searchProducts(item.getProductCode()).isEmpty();
+        // 룰에 있으면 매칭됨
+        if (ruleCache.containsKey(item.getProductName())) return true;
+        // productCode가 없거나 쇼핑몰 상품코드면 미매칭
+        String code = item.getProductCode();
+        if (code == null || code.isBlank() || isChannelProductCode(code)) return false;
+        // 바코드/SKU로 직접 확인
+        return !productRepository.searchProducts(code).isEmpty();
     }
 
     /**
@@ -238,10 +248,14 @@ public class NameMatchingController {
     public ResponseEntity<Map<String, Object>> autoMatch() {
         log.info("자동매칭 실행");
 
-        Pageable all = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, all).getContent());
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, all).getContent());
+        for (Order.OrderStatus st : new Order.OrderStatus[]{Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED}) {
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(st, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
         orders.forEach(o -> o.getItems().size());
 
         int matched = 0;
@@ -356,10 +370,14 @@ public class NameMatchingController {
 
     private void updateOrderItemProductCode(String itemId, Product product) {
         // 모든 PENDING/CONFIRMED 주문에서 해당 itemId 찾아 업데이트
-        Pageable all = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
         List<Order> orders = new ArrayList<>();
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, all).getContent());
-        orders.addAll(orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, all).getContent());
+        for (Order.OrderStatus st : new Order.OrderStatus[]{Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED}) {
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(st, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
 
         for (Order o : orders) {
             o.getItems().size();
