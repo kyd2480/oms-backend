@@ -235,16 +235,16 @@ public class TestDataController {
                           || barcode.equalsIgnoreCase(p.getBarcode()))
                 .findFirst().orElse(null);
             if (product == null) { notFound++; continue; }
-            if (stockAnyang  > 0) { product.setWarehouseStockAnyang(stockAnyang); }
-            if (stockIcheon  > 0) { product.setWarehouseStockIcheon(stockIcheon); }
-            if (stockBucheon > 0) { product.setWarehouseStockBucheon(stockBucheon); }
-            int total = stockAnyang + stockIcheon + stockBucheon;
-            if (total > 0) {
-                product.setTotalStock(product.getTotalStock() + total);
-                product.setAvailableStock(product.getAvailableStock() + total);
+            // processInboundWithWarehouse 사용 → 창고별/전체재고 정합성 보장
+            try {
+                if (stockAnyang  > 0) inventoryService.processInboundWithWarehouse(product.getProductId(), stockAnyang,  "ANYANG",  null, "CSV 일괄 입고");
+                if (stockIcheon  > 0) inventoryService.processInboundWithWarehouse(product.getProductId(), stockIcheon,  "ICHEON",  null, "CSV 일괄 입고");
+                if (stockBucheon > 0) inventoryService.processInboundWithWarehouse(product.getProductId(), stockBucheon, "BUCHEON", null, "CSV 일괄 입고");
+                updated++;
+            } catch (Exception e) {
+                log.error("입고 실패: {} - {}", barcode, e.getMessage());
+                notFound++;
             }
-            productRepository.save(product);
-            updated++;
         }
         log.info("재고 입고 완료: {}개 업데이트, {}개 미발견", updated, notFound);
         return ResponseEntity.ok(Map.of("success", true, "updated", updated,
