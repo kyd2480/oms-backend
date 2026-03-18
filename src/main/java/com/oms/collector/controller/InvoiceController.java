@@ -318,4 +318,30 @@ public class InvoiceController {
         return prefix + String.format("%012d", seq);
     }
 
+
+    /**
+     * 발송 완료 목록 (SHIPPED)
+     * GET /api/inspect/shipped
+     */
+    @GetMapping("/api/inspect/shipped")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<InvoiceOrderDTO>> getShipped() {
+        List<Order> orders = new ArrayList<>();
+        { int p = 0; while(true) {
+            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.SHIPPED, pg);
+            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
+
+        orders.forEach(o -> {
+            o.getItems().size();
+            if (o.getChannel() != null) o.getChannel().getChannelName();
+        });
+
+        List<InvoiceOrderDTO> result = orders.stream()
+            .map(InvoiceOrderDTO::new)
+            .collect(Collectors.toList());
+
+        return ResponseEntity.ok(result);
+    }
+
 }
