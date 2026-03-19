@@ -9,7 +9,6 @@ import com.oms.collector.service.InventoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -118,26 +117,36 @@ public class StockMatchingController {
     ) {
         log.info("재고 매칭: warehouse={}", warehouseCode);
 
+        // ── 주문 로딩 ─────────────────────────────────────────────
         List<Order> orders = new ArrayList<>();
-        // 매칭 탭 = PENDING만 (CONFIRMED는 할당완료 탭에서 별도 조회)
-        // 전체 조회 (페이지네이션 제거 - 건수 제한 없이 전체 처리)
         int p = 0;
         while (true) {
-            Pageable pageable = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var pageable = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
             var slice = orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable);
             orders.addAll(slice.getContent());
             if (!slice.hasNext()) break;
         }
-
         orders.forEach(o -> {
             o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        // ── 전체 상품 캐시 1회 로딩 (N+1 방지) ───────────────────
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(prod -> {
+            if (prod.getSku()     != null && !prod.getSku().isBlank())
+                skuMap.put(prod.getSku().toLowerCase(), prod);
+            if (prod.getBarcode() != null && !prod.getBarcode().isBlank())
+                barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
+        });
+        // ─────────────────────────────────────────────────────────
+
         List<MatchItemDTO> items = new ArrayList<>();
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
-                Product product = findProduct(item);
+                Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
                 int stock = getWarehouseStock(product, warehouseCode);
                 items.add(new MatchItemDTO(o, item, product, stock));
             }
@@ -175,26 +184,32 @@ public class StockMatchingController {
         if (warehouseCode == null || warehouseCode.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "창고 코드 필요"));
         }
-
         log.info("재고 예약: 창고={}, {}건", warehouseCode, orderNos.size());
 
-        int reserved = 0;
-        int failed   = 0;
+        // 캐시 1회 로딩
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(prod -> {
+            if (prod.getSku()     != null) skuMap.put(prod.getSku().toLowerCase(), prod);
+            if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
+        });
+
+        int reserved = 0, failed = 0;
         List<String> failedNos = new ArrayList<>();
 
         for (String orderNo : orderNos) {
             Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
             if (order == null) { failed++; failedNos.add(orderNo); continue; }
-
             order.getItems().size();
             boolean ok = true;
 
             for (OrderItem item : order.getItems()) {
-                Product product = findProduct(item);
+                Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
                 if (product == null) { ok = false; continue; }
                 int qty = item.getQuantity() != null ? item.getQuantity() : 0;
                 int stock = getWarehouseStock(product, warehouseCode);
-                int reserveQty = Math.min(qty, stock); // 부분출고도 가능한 만큼 예약
+                int reserveQty = Math.min(qty, stock);
                 if (reserveQty <= 0) { ok = false; continue; }
                 try {
                     inventoryService.reserveStock(product.getProductId(), reserveQty);
@@ -231,46 +246,43 @@ public class StockMatchingController {
         return code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*");
     }
 
-    private Product findProduct(OrderItem item) {
+    /**
+     * 캐시 기반 상품 조회 (DB 조회 없음)
+     */
+    private Product findProductFromCache(OrderItem item,
+                                          Map<String, Product> skuMap,
+                                          Map<String, Product> barcodeMap,
+                                          List<Product> allProducts) {
         String code = item.getProductCode();
 
-        // productCode가 없거나 쇼핑몰 상품코드면 → 상품명으로 유사도 검색
-        if (code == null || code.isBlank() || isChannelProductCode(code)) {
-            return findBestMatchByName(item.getProductName());
+        if (code != null && !code.isBlank() && !isChannelProductCode(code)) {
+            String lower = code.toLowerCase();
+            Product exact = skuMap.containsKey(lower) ? skuMap.get(lower)
+                          : barcodeMap.get(lower);
+            if (exact != null) return exact;
         }
-
-        // 바코드/SKU로 직접 검색
-        List<Product> found = productRepository.searchProducts(code);
-        Product exact = found.stream()
-            .filter(p -> code.equalsIgnoreCase(p.getSku())
-                      || code.equalsIgnoreCase(p.getBarcode()))
-            .findFirst().orElse(null);
-
-        // 정확히 못 찾으면 상품명으로 fallback
-        return exact != null ? exact : findBestMatchByName(item.getProductName());
+        // SKU/바코드 매칭 실패 시 상품명 유사도
+        return findBestMatchByNameFromCache(item.getProductName(), allProducts);
     }
 
-    private Product findBestMatchByName(String productName) {
+    private Product findBestMatchByNameFromCache(String productName, List<Product> allProducts) {
         if (productName == null || productName.isBlank()) return null;
+        if (allProducts.isEmpty()) return null;
 
-        // 상품코드 부분 추출 (첫 토큰 - 공백 전)
-        String keyword = productName.split(" ")[0];
-        if (keyword.length() > 12) keyword = keyword.substring(0, 12);
-
-        List<Product> candidates = productRepository.searchProducts(keyword);
-
-        // 후보 없으면 앞 8자로 재검색
-        if (candidates.isEmpty()) {
-            String fallback = productName.length() > 8 ? productName.substring(0, 8) : productName;
-            candidates = productRepository.searchProducts(fallback);
-        }
-
-        if (candidates.isEmpty()) return null;
-
-        // Jaccard 유사도로 최적 선택 (0.3 이상)
         final String pName = productName;
+        String code = productName.split(" ")[0].toLowerCase();
+
+        // 코드 앞부분으로 1차 필터
+        List<Product> candidates = allProducts.stream()
+            .filter(p -> p.getProductName() != null &&
+                (p.getProductName().toLowerCase().contains(code) ||
+                 (p.getSku() != null && p.getSku().toLowerCase().contains(code))))
+            .collect(Collectors.toList());
+
+        if (candidates.isEmpty()) candidates = allProducts;
+
         return candidates.stream()
-            .max(java.util.Comparator.comparingDouble(p -> jaccardSimilarity(pName, p.getProductName())))
+            .max(Comparator.comparingDouble(p -> jaccardSimilarity(pName, p.getProductName())))
             .filter(p -> jaccardSimilarity(pName, p.getProductName()) >= 0.3)
             .orElse(null);
     }
@@ -318,24 +330,32 @@ public class StockMatchingController {
         List<Order> orders = new ArrayList<>();
         int p2 = 0;
         while (true) {
-            Pageable pageable = PageRequest.of(p2++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+            var pageable = PageRequest.of(p2++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
             var slice = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable);
             orders.addAll(slice.getContent());
             if (!slice.hasNext()) break;
         }
-
         orders.forEach(o -> {
             o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        // 캐시 로딩
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(prod -> {
+            if (prod.getSku()     != null) skuMap.put(prod.getSku().toLowerCase(), prod);
+            if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
+        });
+
         List<MatchItemDTO> items = new ArrayList<>();
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
-                Product product = findProduct(item);
+                Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
                 int stock = warehouseCode.isBlank() ? 0 : getWarehouseStock(product, warehouseCode);
                 MatchItemDTO dto = new MatchItemDTO(o, item, product, stock);
-                dto.shipStatus = "ALLOCATED"; // 할당완료 상태 표시
+                dto.shipStatus = "ALLOCATED";
                 items.add(dto);
             }
         }
@@ -354,11 +374,19 @@ public class StockMatchingController {
 
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
-
         order.getItems().size();
 
+        // 이 주문만 필요하므로 전체 캐시 대신 단건 SKU/바코드 조회
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(prod -> {
+            if (prod.getSku()     != null) skuMap.put(prod.getSku().toLowerCase(), prod);
+            if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
+        });
+
         for (OrderItem item : order.getItems()) {
-            Product product = findProduct(item);
+            Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
             if (product == null) continue;
             int qty = item.getQuantity() != null ? item.getQuantity() : 0;
             try {
