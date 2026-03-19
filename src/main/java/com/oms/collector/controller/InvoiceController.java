@@ -41,19 +41,36 @@ public class InvoiceController {
     );
 
     // ─── DTO ─────────────────────────────────────────────────────
+
+    /** 주문 내 개별 상품 아이템 */
+    public static class OrderItemDTO {
+        public String productName;  // 상품명
+        public String option;       // 옵션 (색상/사이즈 등)
+        public String barcode;      // 바코드
+        public int    quantity;     // 수량
+
+        public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
+            this.productName = i.getProductName();
+            this.option      = i.getOptionName() != null ? i.getOptionName() : "";
+            this.barcode     = i.getBarcode()    != null ? i.getBarcode()    : "";
+            this.quantity    = i.getQuantity()   != null ? i.getQuantity()   : 1;
+        }
+    }
+
     public static class InvoiceOrderDTO {
         public String orderNo;
         public String channelName;
         public String recipientName;
         public String recipientPhone;
         public String address;
-        public String productName;
-        public int    quantity;
+        public String productName;           // 상품명 합본 (하위호환 유지)
+        public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
-        public String carrierCode;   // 택배사 코드
-        public String carrierName;   // 택배사명
-        public String trackingNo;    // 송장번호
-        public boolean hasInvoice;   // 송장 입력 여부
+        public String carrierCode;           // 택배사 코드
+        public String carrierName;           // 택배사명
+        public String trackingNo;            // 송장번호
+        public boolean hasInvoice;           // 송장 입력 여부
+        public List<OrderItemDTO> items;     // ★ 개별 상품 목록 (옵션·바코드 포함)
 
         public InvoiceOrderDTO(Order o) {
             this.orderNo       = o.getOrderNo();
@@ -67,6 +84,10 @@ public class InvoiceController {
             this.quantity      = o.getItems().stream()
                 .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
+            // 개별 상품 목록 (옵션·바코드 포함)
+            this.items         = o.getItems().stream()
+                .map(OrderItemDTO::new)
+                .collect(Collectors.toList());
             // 배송 메모에서 송장 정보 파싱 (저장 형식: "CARRIER:CJ|TRACKING:1234567890")
             parseInvoiceFromMemo(o.getDeliveryMemo());
         }
