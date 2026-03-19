@@ -7,7 +7,6 @@ import com.oms.collector.entity.ProductMatchingRule;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductMatchingRuleRepository;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import com.oms.collector.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 import java.util.Arrays;
-import java.util.stream.Collectors;
 import java.util.stream.Collectors;
 
 /**
@@ -107,32 +105,48 @@ public class NameMatchingController {
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
         }
-
         orders.forEach(o -> {
             o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
-        // 매칭 룰 전체 캐싱 (건별 DB 조회 방지)
+        // ── 캐시 사전 로딩 (N+1 방지) ──────────────────────────
+        // 매칭 룰 캐시
         Map<String, ProductMatchingRule> ruleCache = new HashMap<>();
         ruleRepository.findAllByOrderByCreatedAtDesc()
             .forEach(r -> ruleCache.put(r.getChannelProductName(), r));
+
+        // 전체 상품 SKU·바코드 Set (아이템마다 DB 조회 → 메모리 룩업으로 변경)
+        Set<String> productSkuSet     = new HashSet<>();
+        Set<String> productBarcodeSet = new HashSet<>();
+        Map<String, Product> skuToProduct     = new HashMap<>();
+        Map<String, Product> barcodeToProduct = new HashMap<>();
+        productRepository.findAll().forEach(p -> {
+            if (p.getSku()     != null && !p.getSku().isBlank()) {
+                productSkuSet.add(p.getSku().toLowerCase());
+                skuToProduct.put(p.getSku().toLowerCase(), p);
+            }
+            if (p.getBarcode() != null && !p.getBarcode().isBlank()) {
+                productBarcodeSet.add(p.getBarcode().toLowerCase());
+                barcodeToProduct.put(p.getBarcode().toLowerCase(), p);
+            }
+        });
+        // ────────────────────────────────────────────────────────
 
         List<UnmatchedItemDTO> result = new ArrayList<>();
 
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
-                if (isMatchedFast(item, ruleCache)) continue;
+                // 룰 캐시 또는 SKU/바코드 Set으로 매칭 여부 확인 (DB 조회 없음)
+                if (isMatchedFast(item, ruleCache, productSkuSet, productBarcodeSet)) continue;
 
                 UnmatchedItemDTO dto = new UnmatchedItemDTO(o, item);
 
-                // [1] 바코드 직접 추천
+                // [1] 바코드(productCode) 직접 추천 — Set 룩업
                 if (item.getProductCode() != null && !item.getProductCode().isBlank()) {
-                    List<Product> byBarcode = productRepository.searchProducts(item.getProductCode());
-                    Product exact = byBarcode.stream()
-                        .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
-                                  || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
-                        .findFirst().orElse(null);
+                    String code = item.getProductCode().toLowerCase();
+                    Product exact = skuToProduct.containsKey(code) ? skuToProduct.get(code)
+                                  : barcodeToProduct.get(code);
                     if (exact != null) {
                         dto.suggestedProductId   = exact.getProductId().toString();
                         dto.suggestedProductName = exact.getProductName();
@@ -150,9 +164,10 @@ public class NameMatchingController {
                         dto.matchStatus          = "AUTO_SUGGESTED";
                     }
                 }
-                // [3] 유사도 추천 (바코드/룰 모두 실패 시만)
+                // [3] 유사도 추천 (바코드/룰 모두 실패 시만) — 이미 로딩된 상품 목록 재사용
                 if (!"AUTO_SUGGESTED".equals(dto.matchStatus)) {
-                    Product similar = findBestMatch(item.getProductName());
+                    Product similar = findBestMatchFromCache(item.getProductName(),
+                        new ArrayList<>(skuToProduct.values()));
                     if (similar != null) {
                         dto.suggestedProductId   = similar.getProductId().toString();
                         dto.suggestedProductName = similar.getProductName();
@@ -175,15 +190,16 @@ public class NameMatchingController {
         return code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*");
     }
 
-    // 룰 캐시 사용하는 빠른 매칭 확인
-    private boolean isMatchedFast(OrderItem item, Map<String, ProductMatchingRule> ruleCache) {
-        // 룰에 있으면 매칭됨
+    // Set 룩업 기반 빠른 매칭 확인 (DB 조회 없음)
+    private boolean isMatchedFast(OrderItem item,
+                                   Map<String, ProductMatchingRule> ruleCache,
+                                   Set<String> skuSet,
+                                   Set<String> barcodeSet) {
         if (ruleCache.containsKey(item.getProductName())) return true;
-        // productCode가 없거나 쇼핑몰 상품코드면 미매칭
         String code = item.getProductCode();
         if (code == null || code.isBlank() || isChannelProductCode(code)) return false;
-        // 바코드/SKU로 직접 확인
-        return !productRepository.searchProducts(code).isEmpty();
+        String lower = code.toLowerCase();
+        return skuSet.contains(lower) || barcodeSet.contains(lower);
     }
 
     /**
@@ -258,67 +274,82 @@ public class NameMatchingController {
         }
         orders.forEach(o -> o.getItems().size());
 
+        // ── 캐시 사전 로딩 ──────────────────────────────────────
+        Map<String, ProductMatchingRule> ruleCache = new HashMap<>();
+        ruleRepository.findAllByOrderByCreatedAtDesc()
+            .forEach(r -> ruleCache.put(r.getChannelProductName(), r));
+
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(p -> {
+            if (p.getSku()     != null) skuMap.put(p.getSku().toLowerCase(), p);
+            if (p.getBarcode() != null) barcodeMap.put(p.getBarcode().toLowerCase(), p);
+        });
+        // ────────────────────────────────────────────────────────
+
         int matched = 0;
         int skipped = 0;
 
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
-                if (isMatched(item)) continue;
+                Set<String> skuSet     = skuMap.keySet();
+                Set<String> barcodeSet = barcodeMap.keySet();
+                if (isMatchedFast(item, ruleCache, skuSet, barcodeSet)) continue;
 
-                // [1] 바코드(productCode) 직접 매칭
+                // [1] 바코드(productCode) 직접 매칭 — Map 룩업
                 if (item.getProductCode() != null && !item.getProductCode().isBlank()
                         && !item.getProductCode().startsWith("FAKE")
                         && !item.getProductCode().startsWith("NOINSTOCK")) {
-                    List<Product> byBarcode = productRepository.searchProducts(item.getProductCode());
-                    Product exactMatch = byBarcode.stream()
-                        .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
-                                  || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
-                        .findFirst().orElse(null);
+                    String lower = item.getProductCode().toLowerCase();
+                    Product exactMatch = skuMap.containsKey(lower) ? skuMap.get(lower)
+                                       : barcodeMap.get(lower);
                     if (exactMatch != null) {
-                        // 이미 productCode가 맞게 설정되어 있음 - 룰만 저장
-                        if (!ruleRepository.existsByChannelProductName(item.getProductName())) {
-                            ruleRepository.save(ProductMatchingRule.builder()
+                        if (!ruleCache.containsKey(item.getProductName())) {
+                            ProductMatchingRule newRule = ProductMatchingRule.builder()
                                 .channelProductName(item.getProductName())
                                 .productId(exactMatch.getProductId())
                                 .productName(exactMatch.getProductName())
                                 .sku(exactMatch.getSku())
                                 .matchType("AUTO")
-                                .build());
+                                .build();
+                            ruleRepository.save(newRule);
+                            ruleCache.put(item.getProductName(), newRule);
                         }
                         matched++;
                         continue;
                     }
                 }
 
-                // [2] 기존 룰로 매칭
-                Optional<ProductMatchingRule> rule =
-                    ruleRepository.findByChannelProductName(item.getProductName());
-                if (rule.isPresent()) {
-                    try {
-                        Product product = productRepository
-                            .findById(rule.get().getProductId()).orElse(null);
-                        if (product != null) {
-                            item.setProductCode(product.getSku());
-                            orderRepository.save(o);
-                            matched++;
-                            continue;
-                        }
-                    } catch (Exception ignored) {}
+                // [2] 룰 캐시로 매칭
+                ProductMatchingRule rule = ruleCache.get(item.getProductName());
+                if (rule != null) {
+                    Product product = skuMap.values().stream()
+                        .filter(p -> p.getProductId().equals(rule.getProductId()))
+                        .findFirst().orElse(null);
+                    if (product != null) {
+                        item.setProductCode(product.getSku());
+                        orderRepository.save(o);
+                        matched++;
+                        continue;
+                    }
                 }
 
-                // [3] 상품명 전체 유사도 매칭
-                Product best = findBestMatch(item.getProductName());
+                // [3] 유사도 매칭 — 캐시된 목록 사용
+                Product best = findBestMatchFromCache(item.getProductName(), allProducts);
                 if (best != null) {
                     item.setProductCode(best.getSku());
                     orderRepository.save(o);
-                    if (!ruleRepository.existsByChannelProductName(item.getProductName())) {
-                        ruleRepository.save(ProductMatchingRule.builder()
+                    if (!ruleCache.containsKey(item.getProductName())) {
+                        ProductMatchingRule newRule = ProductMatchingRule.builder()
                             .channelProductName(item.getProductName())
                             .productId(best.getProductId())
                             .productName(best.getProductName())
                             .sku(best.getSku())
                             .matchType("AUTO")
-                            .build());
+                            .build();
+                        ruleRepository.save(newRule);
+                        ruleCache.put(item.getProductName(), newRule);
                     }
                     matched++;
                     continue;
@@ -358,18 +389,8 @@ public class NameMatchingController {
 
     // ─── 헬퍼 ────────────────────────────────────────────────────
 
-    private boolean isMatched(OrderItem item) {
-        if (item.getProductCode() == null || item.getProductCode().isBlank()) return false;
-        // productCode(바코드)로 재고DB에서 찾을 수 있으면 매칭됨
-        List<Product> found = productRepository.searchProducts(item.getProductCode());
-        return found.stream().anyMatch(p ->
-            item.getProductCode().equalsIgnoreCase(p.getSku()) ||
-            item.getProductCode().equalsIgnoreCase(p.getBarcode())
-        );
-    }
-
     private void updateOrderItemProductCode(String itemId, Product product) {
-        // 모든 PENDING/CONFIRMED 주문에서 해당 itemId 찾아 업데이트
+        // itemId로 직접 OrderItem 조회 후 업데이트 (전체 주문 스캔 방지)
         List<Order> orders = new ArrayList<>();
         for (Order.OrderStatus st : new Order.OrderStatus[]{Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED}) {
             int p = 0; while(true) {
@@ -378,17 +399,18 @@ public class NameMatchingController {
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
         }
-
         for (Order o : orders) {
             o.getItems().size();
             for (OrderItem item : o.getItems()) {
                 if (item.getItemId() != null && item.getItemId().toString().equals(itemId)) {
                     item.setProductCode(product.getSku());
                     orderRepository.save(o);
+                    log.info("OrderItem 업데이트: {} → {}", itemId, product.getSku());
                     return;
                 }
             }
         }
+        log.warn("OrderItem을 찾을 수 없음: {}", itemId);
     }
 
     /**
@@ -425,6 +447,32 @@ public class NameMatchingController {
      * 상품명 유사도 기반 최적 상품 탐색
      * 검색 키워드로 후보군을 뽑은 뒤, 전체 상품명 유사도로 최적 선택
      */
+    /**
+     * 캐시된 상품 목록에서 유사도 기반 최적 매칭 (DB 조회 없음)
+     */
+    private Product findBestMatchFromCache(String channelProductName, List<Product> allProducts) {
+        if (channelProductName == null || channelProductName.isBlank()) return null;
+        if (allProducts.isEmpty()) return null;
+
+        String code = channelProductName.split(" ")[0];
+        if (code.length() > 12) code = code.substring(0, 12);
+        final String codeFilter = code.toLowerCase();
+
+        // 코드 앞부분으로 1차 필터링
+        List<Product> candidates = allProducts.stream()
+            .filter(p -> p.getProductName() != null &&
+                (p.getProductName().toLowerCase().contains(codeFilter) ||
+                 (p.getSku() != null && p.getSku().toLowerCase().contains(codeFilter))))
+            .collect(Collectors.toList());
+
+        if (candidates.isEmpty()) candidates = allProducts;
+
+        return candidates.stream()
+            .max(Comparator.comparingDouble(p -> similarity(channelProductName, p.getProductName())))
+            .filter(p -> similarity(channelProductName, p.getProductName()) >= SIMILARITY_THRESHOLD)
+            .orElse(null);
+    }
+
     private Product findBestMatch(String channelProductName) {
         if (channelProductName == null || channelProductName.isBlank()) return null;
 
