@@ -44,6 +44,30 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * 상태별 주문 조회 (페이지네이션)
      */
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
+
+    /**
+     * 상태 + 기간별 주문 조회
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.orderedAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> findByOrderStatusAndDateRange(
+        @Param("status") Order.OrderStatus status,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * 상태 + 기간별 주문 조회 (updatedAt 기준 — 발송완료 등 상태변경 시각 기준)
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY o.updatedAt DESC")
+    List<Order> findByOrderStatusAndUpdatedAtRange(
+        @Param("status") Order.OrderStatus status,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
     
     /**
      * 기간별 주문 조회

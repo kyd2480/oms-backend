@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 송장 컨트롤러
@@ -140,19 +142,30 @@ public class InvoiceController {
 
     /**
      * 송장 입력 대상 목록 (CONFIRMED - 재고할당 완료)
-     * GET /api/invoice/orders
+     * GET /api/invoice/orders?startDate=2026-01-01&endDate=2026-03-19
+     * 날짜 미입력 시 전체 조회
      */
     @GetMapping("/orders")
     @Transactional(readOnly = true)
     public ResponseEntity<List<InvoiceOrderDTO>> getOrders(
         @RequestParam(defaultValue = "0")   int page,
-        @RequestParam(defaultValue = "200") int size
+        @RequestParam(defaultValue = "200") int size,
+        @RequestParam(required = false) String startDate,
+        @RequestParam(required = false) String endDate
     ) {
-        List<Order> orders = new ArrayList<>();
-        { int p = 0; while(true) {
-            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
-            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
+        List<Order> orders;
+        if (startDate != null && endDate != null) {
+            LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
+            LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
+            orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
+        } else {
+            orders = new ArrayList<>();
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -235,19 +248,29 @@ public class InvoiceController {
 
     /**
      * 송장 입력 완료 목록
-     * GET /api/invoice/completed
+     * GET /api/invoice/completed?startDate=2026-01-01&endDate=2026-03-19
      */
     @GetMapping("/completed")
     @Transactional(readOnly = true)
     public ResponseEntity<List<InvoiceOrderDTO>> getCompleted(
         @RequestParam(defaultValue = "0")   int page,
-        @RequestParam(defaultValue = "200") int size
+        @RequestParam(defaultValue = "200") int size,
+        @RequestParam(required = false) String startDate,
+        @RequestParam(required = false) String endDate
     ) {
-        List<Order> orders = new ArrayList<>();
-        { int p = 0; while(true) {
-            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
-            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
+        List<Order> orders;
+        if (startDate != null && endDate != null) {
+            LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
+            LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
+            orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
+        } else {
+            orders = new ArrayList<>();
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
 
         orders.forEach(o -> {
             o.getItems().size();
@@ -340,16 +363,28 @@ public class InvoiceController {
 
     /**
      * 발송 완료 목록 (SHIPPED)
-     * GET /api/invoice/shipped  ← (주의: 클래스 prefix /api/invoice 에 붙음)
+     * GET /api/invoice/shipped?startDate=2026-01-01&endDate=2026-03-19
+     * 날짜는 발송처리 시각(updatedAt) 기준
      */
     @GetMapping("/shipped")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<InvoiceOrderDTO>> getShipped() {
-        List<Order> orders = new ArrayList<>();
-        { int p = 0; while(true) {
-            var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-            var sl = orderRepository.findByOrderStatus(Order.OrderStatus.SHIPPED, pg);
-            orders.addAll(sl.getContent()); if(!sl.hasNext()) break; } }
+    public ResponseEntity<List<InvoiceOrderDTO>> getShipped(
+        @RequestParam(required = false) String startDate,
+        @RequestParam(required = false) String endDate
+    ) {
+        List<Order> orders;
+        if (startDate != null && endDate != null) {
+            LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
+            LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
+            orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.SHIPPED, start, end);
+        } else {
+            orders = new ArrayList<>();
+            int p = 0; while(true) {
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.SHIPPED, pg);
+                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
+            }
+        }
 
         orders.forEach(o -> {
             o.getItems().size();
