@@ -1,0 +1,105 @@
+# ============================================
+# Production Configuration for Railway/Render
+# 안정성 최적화
+# ============================================
+
+server:
+  port: ${PORT:8091}
+  tomcat:
+    threads:
+      max: 50          # 최대 스레드
+      min-spare: 10    # 최소 유휴 스레드
+    connection-timeout: 60000  # 60초
+    max-connections: 100       # 최대 연결 수
+  shutdown: graceful           # 우아한 종료
+
+spring:
+  application:
+    name: order-collector-service
+  
+  # 파일 업로드 설정
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 100MB
+      max-request-size: 100MB
+      file-size-threshold: 10MB
+  
+  # 프로덕션 데이터베이스 (Railway PostgreSQL)
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/railway}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10          # 풀 크기 증가
+      minimum-idle: 5                # 최소 유휴 연결
+      connection-timeout: 60000      # 연결 타임아웃 60초
+      idle-timeout: 600000           # 유휴 타임아웃 10분
+      max-lifetime: 1800000          # 최대 수명 30분
+      leak-detection-threshold: 120000  # 누수 감지 2분
+      connection-test-query: "SELECT 1"
+      auto-commit: true              # 자동 커밋 활성화
+  
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+          batch_size: 100              # 배치 크기 증가
+          fetch_size: 100              # 페치 크기
+        order_inserts: true
+        order_updates: true
+        generate_statistics: false
+        cache:
+          use_second_level_cache: false  # 2차 캐시 비활성화
+          use_query_cache: false         # 쿼리 캐시 비활성화
+    open-in-view: false
+  
+  # JSON 설정
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: Asia/Seoul
+    default-property-inclusion: non_null
+
+# Actuator 설정 (Health check)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true  # Liveness/Readiness 프로브
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+
+# 로깅 설정 (프로덕션)
+logging:
+  level:
+    root: INFO
+    com.oms.collector: INFO
+    org.springframework.web: WARN
+    org.hibernate: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# 주문 수집 설정
+collector:
+  schedule:
+    enabled: ${SCHEDULER_ENABLED:true}
+    interval: 600000     # 10분
+    initial-delay: 120000  # 2분 (시작 시간 여유)
+  retry:
+    max-attempts: 3
+    delay: 5000

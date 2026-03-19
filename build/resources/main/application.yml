@@ -1,0 +1,72 @@
+# ============================================
+# Order Collector Service Configuration
+# ============================================
+
+server:
+  port: 8091
+
+spring:
+  application:
+    name: order-collector-service
+  
+  # 데이터베이스 설정
+  datasource:
+    url: jdbc:postgresql://localhost:5437/collector_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+  
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: update  # 개발: update, 프로덕션: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+  
+  # JSON 설정
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: Asia/Seoul
+    default-property-inclusion: non_null
+
+# Actuator 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# 로깅 설정
+logging:
+  level:
+    com.oms.collector: TRACE
+    com.oms.collector.service: TRACE
+    org.springframework.web: INFO
+    org.springframework.transaction: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+# 주문 수집 설정
+collector:
+  schedule:
+    enabled: true  # 스케줄러 켜기
+    interval: 120000  # 2분 (테스트용, 원래는 600000=10분)
+    initial-delay: 30000  # 30초 후 시작
+    daily-cron: "0 0 0 * * *"  # 매일 자정
+    retry-cron: "0 0 * * * *"  # 매시간
+  retry:
+    max-attempts: 3
+    delay: 5000  # 5초
