@@ -1,0 +1,84 @@
+package com.logistics.scm.auth.service;
+
+import com.logistics.scm.auth.dto.LoginRequest;
+import com.logistics.scm.auth.dto.LoginResponse;
+import com.logistics.scm.auth.dto.SignupRequest;
+import com.logistics.scm.auth.dto.UserDTO;
+import com.logistics.scm.auth.entity.User;
+import com.logistics.scm.auth.repository.UserRepository;
+import com.logistics.scm.auth.util.JwtTokenUtil;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtTokenUtil jwtTokenUtil;
+
+    /** 회원가입 */
+    @Transactional
+    public LoginResponse signup(SignupRequest request) {
+        if (userRepository.existsByUsername(request.getUsername()))
+            return LoginResponse.failure("이미 사용 중인 아이디입니다");
+        if (userRepository.existsByEmail(request.getEmail()))
+            return LoginResponse.failure("이미 사용 중인 이메일입니다");
+
+        User user = User.create(
+            request.getUsername(),
+            passwordEncoder.encode(request.getPassword()),
+            request.getName(),
+            request.getEmail(),
+            User.UserRole.USER
+        );
+        userRepository.save(user);
+
+        String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name());
+        log.info("회원가입 완료: username={}", user.getUsername());
+        return LoginResponse.success(token, UserDTO.from(user));
+    }
+
+    /** 로그인 */
+    @Transactional
+    public LoginResponse login(LoginRequest request) {
+        try {
+            User user = userRepository.findByUsername(request.getUsername())
+                    .orElseThrow(() -> new RuntimeException("아이디 또는 비밀번호가 올바르지 않습니다"));
+
+            if (!user.isEnabled())
+                return LoginResponse.failure("비활성화된 계정입니다");
+
+            if (!passwordEncoder.matches(request.getPassword(), user.getPassword()))
+                return LoginResponse.failure("아이디 또는 비밀번호가 올바르지 않습니다");
+
+            user.updateLastLoginTime();
+            userRepository.save(user);
+
+            String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name());
+            log.info("로그인 성공: username={}, role={}", user.getUsername(), user.getRole());
+            return LoginResponse.success(token, UserDTO.from(user));
+
+        } catch (RuntimeException e) {
+            log.error("로그인 실패: {}", e.getMessage());
+            return LoginResponse.failure(e.getMessage());
+        }
+    }
+
+    public boolean validateToken(String token, String username) {
+        return jwtTokenUtil.validateToken(token, username);
+    }
+
+    public String getUsernameFromToken(String token) {
+        return jwtTokenUtil.getUsernameFromToken(token);
+    }
+
+    public String getRoleFromToken(String token) {
+        return jwtTokenUtil.getRoleFromToken(token);
+    }
+}

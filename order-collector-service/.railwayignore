@@ -1,0 +1,28 @@
+# Railway 배포 제외 파일
+
+# 테스트 파일
+src/test/**
+*.test.java
+
+# IDE 설정
+.idea/
+.vscode/
+*.iml
+
+# 빌드 캐시
+.gradle/
+build/
+target/
+out/
+
+# 로컬 설정
+application-local.yml
+application-dev.yml
+
+# 문서
+README.md
+docs/
+
+# Git
+.git/
+.gitignore
