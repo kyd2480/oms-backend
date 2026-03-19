@@ -370,4 +370,44 @@ public class InvoiceController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * 발송취소 (SHIPPED → CONFIRMED 롤백)
+     * POST /api/inspect/cancel/{orderNo}
+     */
+    @PostMapping("/api/inspect/cancel/{orderNo}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> cancelShip(
+        @PathVariable String orderNo
+    ) {
+        Order order = orderRepository.findByOrderNo(orderNo)
+            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
+        if (order.getOrderStatus() != Order.OrderStatus.SHIPPED) {
+            return ResponseEntity.badRequest()
+                .body(Map.of("success", false, "message", "SHIPPED 상태가 아닙니다: " + order.getOrderStatus()));
+        }
+        order.setOrderStatus(Order.OrderStatus.CONFIRMED);
+        orderRepository.save(order);
+        log.info("발송취소: {} → CONFIRMED", orderNo);
+        return ResponseEntity.ok(Map.of("success", true, "message", "발송취소 완료"));
+    }
+
+    /**
+     * 송장삭제 (deliveryMemo 초기화)
+     * POST /api/invoice/delete/{orderNo}
+     */
+    @PostMapping("/delete/{orderNo}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> deleteInvoice(
+        @PathVariable String orderNo
+    ) {
+        Order order = orderRepository.findByOrderNo(orderNo)
+            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
+        order.setDeliveryMemo(null);
+        orderRepository.save(order);
+        log.info("송장삭제: {}", orderNo);
+        return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
+    }
+
 }
