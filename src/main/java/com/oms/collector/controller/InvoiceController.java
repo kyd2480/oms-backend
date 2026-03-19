@@ -46,13 +46,13 @@ public class InvoiceController {
     public static class OrderItemDTO {
         public String productName;  // 상품명
         public String option;       // 옵션 (색상/사이즈 등)
-        public String barcode;      // 바코드
+        public String barcode;      // 바코드 (추후 OrderItem 엔티티에 필드 추가 시 활성화)
         public int    quantity;     // 수량
 
         public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
             this.productName = i.getProductName();
             this.option      = i.getOptionName() != null ? i.getOptionName() : "";
-            this.barcode     = i.getBarcode()    != null ? i.getBarcode()    : "";
+            this.barcode     = "";  // TODO: OrderItem 엔티티에 barcode 필드 추가 후 i.getBarcode() 로 교체
             this.quantity    = i.getQuantity()   != null ? i.getQuantity()   : 1;
         }
     }
