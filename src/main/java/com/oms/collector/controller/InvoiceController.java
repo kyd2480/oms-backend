@@ -66,6 +66,7 @@ public class InvoiceController {
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
+        public String shippedAt;             // 출고(발송처리) 일시
         public String carrierCode;           // 택배사 코드
         public String carrierName;           // 택배사명
         public String trackingNo;            // 송장번호
@@ -84,6 +85,7 @@ public class InvoiceController {
             this.quantity      = o.getItems().stream()
                 .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
+            this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             // 개별 상품 목록 (옵션·바코드 포함)
             this.items         = o.getItems().stream()
                 .map(OrderItemDTO::new)
@@ -323,8 +325,11 @@ public class InvoiceController {
         ));
     }
 
-    // ─── 임시 송장번호 생성 (실제 API 연결 시 교체) ──────────────
-    // ⚠️ 택배사 API 연결 후 이 메서드 제거하고 실제 API 호출로 교체
+    // ─── 임시 송장번호 생성 (실제 택배사 API 연결 시 교체) ───────
+    // AtomicLong으로 동일 ms 내 중복 방지
+    private static final java.util.concurrent.atomic.AtomicLong TRACKING_SEQ =
+        new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
+
     private String generateTrackingNo(String carrierCode) {
         String prefix = switch (carrierCode) {
             case "CJ"     -> "6";
@@ -334,8 +339,8 @@ public class InvoiceController {
             case "LOGEN"  -> "9";
             default       -> "6";
         };
-        // 13자리 임의 번호 생성
-        long seq = System.currentTimeMillis() % 1_000_000_000_000L;
+        // 항상 증가하는 유니크 순번 (동시 호출 시에도 중복 없음)
+        long seq = TRACKING_SEQ.incrementAndGet() % 1_000_000_000_000L;
         return prefix + String.format("%012d", seq);
     }
 
