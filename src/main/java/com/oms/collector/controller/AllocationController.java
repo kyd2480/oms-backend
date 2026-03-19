@@ -109,10 +109,14 @@ public class AllocationController {
             if (product == null) continue;
             int qty = item.getQuantity() != null ? item.getQuantity() : 0;
             try {
+                // confirmReservedStock: totalStock-qty, reservedStock-qty
+                // (재고매칭에서 reserveStock으로 예약했으므로 확정 시 예약→출고 처리)
                 inventoryService.processOutboundWithWarehouse(
                     product.getProductId(), qty, selectedWarehouseCode,
                     order.getOrderId(), "검수발송 출고: " + orderNo
                 );
+                // 예약 재고 해제 (reservedStock 복구)
+                inventoryService.releaseReservedStock(product.getProductId(), qty);
             } catch (Exception e) {
                 log.error("재고 차감 실패: {} - {}", orderNo, e.getMessage());
             }

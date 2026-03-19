@@ -412,21 +412,25 @@ public class InvoiceController {
 
             try {
                 if (warehouseCode != null && !warehouseCode.isBlank()) {
-                    // InventoryService.processInboundWithWarehouse 로 재고 복구
-                    // 거래 내역도 자동 기록됨
+                    // 1단계: totalStock + warehouseStock 복구
                     inventoryService.processInboundWithWarehouse(
                         product.getProductId(), qty, warehouseCode,
                         null, "발송취소 재고복구: " + orderNo
                     );
                 } else {
-                    // 창고 정보 없으면 전체 입고로 복구
                     inventoryService.processInbound(
                         product.getProductId(), qty, null,
                         "발송취소 재고복구 (창고미상): " + orderNo
                     );
                 }
+                // 2단계: 예약 상태 복원
+                // 주문이 CONFIRMED로 돌아가므로 재고도 예약 상태로 전환
+                // processInboundWithWarehouse → availableStock+qty
+                // reserveStock → availableStock-qty, reservedStock+qty
+                inventoryService.reserveStock(product.getProductId(), qty);
+
                 restored++;
-                log.info("재고 복구: {} × {}개 / 창고:{} ({})", product.getSku(), qty, warehouseCode, orderNo);
+                log.info("재고 복구 완료: {} × {}개 / 창고:{} ({})", product.getSku(), qty, warehouseCode, orderNo);
             } catch (Exception e) {
                 log.error("재고 복구 실패: {} - {}", orderNo, e.getMessage());
             }
