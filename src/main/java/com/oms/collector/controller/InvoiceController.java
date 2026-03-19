@@ -2,6 +2,7 @@ package com.oms.collector.controller;
 
 import com.oms.collector.entity.Order;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.service.tracking.TrackingNumberProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -20,6 +21,11 @@ import java.util.stream.Collectors;
  * POST /api/invoice/save            - 송장번호 저장
  * POST /api/invoice/save-bulk       - 일괄 저장
  * GET  /api/invoice/completed       - 송장 입력 완료 목록
+ * GET  /api/invoice/shipped         - 발송 완료 목록 (SHIPPED)
+ * POST /api/invoice/auto-assign/{orderNo} - 단건 자동 부여
+ * POST /api/invoice/auto-assign-all - 일괄 자동 부여
+ * POST /api/invoice/cancel/{orderNo} - 발송취소 (SHIPPED → CONFIRMED)
+ * POST /api/invoice/delete/{orderNo} - 송장삭제 (deliveryMemo 초기화)
  */
 @Slf4j
 @RestController
@@ -29,6 +35,7 @@ import java.util.stream.Collectors;
 public class InvoiceController {
 
     private final OrderRepository orderRepository;
+    private final TrackingNumberProvider trackingNumberProvider;
 
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
@@ -265,7 +272,7 @@ public class InvoiceController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        String trackingNo = generateTrackingNo(carrierCode);
+        String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
         order.setDeliveryMemo(
             "INVOICE:CARRIER:" + carrierCode +
             "|CARRIER_NAME:" + carrierName +
@@ -307,7 +314,7 @@ public class InvoiceController {
         for (Order order : orders) {
             // 이미 송장 있으면 스킵
             if (order.getDeliveryMemo() != null && order.getDeliveryMemo().startsWith("INVOICE:")) continue;
-            String trackingNo = generateTrackingNo(carrierCode);
+            String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
             order.setDeliveryMemo(
                 "INVOICE:CARRIER:" + carrierCode +
                 "|CARRIER_NAME:" + carrierName +
@@ -325,31 +332,11 @@ public class InvoiceController {
         ));
     }
 
-    // ─── 임시 송장번호 생성 (실제 택배사 API 연결 시 교체) ───────
-    // AtomicLong으로 동일 ms 내 중복 방지
-    private static final java.util.concurrent.atomic.AtomicLong TRACKING_SEQ =
-        new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
-
-    private String generateTrackingNo(String carrierCode) {
-        String prefix = switch (carrierCode) {
-            case "CJ"     -> "6";
-            case "POST"   -> "6";
-            case "HANJIN" -> "7";
-            case "LOTTE"  -> "8";
-            case "LOGEN"  -> "9";
-            default       -> "6";
-        };
-        // 항상 증가하는 유니크 순번 (동시 호출 시에도 중복 없음)
-        long seq = TRACKING_SEQ.incrementAndGet() % 1_000_000_000_000L;
-        return prefix + String.format("%012d", seq);
-    }
-
-
     /**
      * 발송 완료 목록 (SHIPPED)
-     * GET /api/inspect/shipped
+     * GET /api/invoice/shipped  ← (주의: 클래스 prefix /api/invoice 에 붙음)
      */
-    @GetMapping("/api/inspect/shipped")
+    @GetMapping("/shipped")
     @Transactional(readOnly = true)
     public ResponseEntity<List<InvoiceOrderDTO>> getShipped() {
         List<Order> orders = new ArrayList<>();
@@ -372,9 +359,9 @@ public class InvoiceController {
 
     /**
      * 발송취소 (SHIPPED → CONFIRMED 롤백)
-     * POST /api/inspect/cancel/{orderNo}
+     * POST /api/invoice/cancel/{orderNo}
      */
-    @PostMapping("/api/inspect/cancel/{orderNo}")
+    @PostMapping("/cancel/{orderNo}")
     @Transactional
     public ResponseEntity<Map<String, Object>> cancelShip(
         @PathVariable String orderNo
