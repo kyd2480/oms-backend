@@ -40,8 +40,12 @@ public class AllocationController {
 
     // ─── 인메모리 창고 설정 저장 (간단한 구현) ────────────────
     // 실제 운영 시 DB 테이블로 관리 권장
-    private static String selectedWarehouseCode = null;
-    private static String selectedWarehouseName = null;
+    public static String selectedWarehouseCode = null;
+    public static String selectedWarehouseName = null;
+
+    /** 현재 선택된 창고 코드 반환 (다른 컨트롤러에서 참조용) */
+    public static String getCurrentWarehouseCode() { return selectedWarehouseCode; }
+    public static String getCurrentWarehouseName() { return selectedWarehouseName; }
 
     /**
      * 현재 할당 창고 조회

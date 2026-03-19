@@ -1,7 +1,11 @@
 package com.oms.collector.controller;
 
 import com.oms.collector.entity.Order;
+import com.oms.collector.entity.OrderItem;
+import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +39,8 @@ import java.util.stream.Collectors;
 public class InvoiceController {
 
     private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final InventoryService inventoryService;
     private final TrackingNumberProvider trackingNumberProvider;
 
     // 택배사 목록
@@ -358,7 +364,7 @@ public class InvoiceController {
     }
 
     /**
-     * 발송취소 (SHIPPED → CONFIRMED 롤백)
+     * 발송취소 (SHIPPED → CONFIRMED 롤백 + 재고 복구)
      * POST /api/invoice/cancel/{orderNo}
      */
     @PostMapping("/cancel/{orderNo}")
@@ -373,10 +379,68 @@ public class InvoiceController {
             return ResponseEntity.badRequest()
                 .body(Map.of("success", false, "message", "SHIPPED 상태가 아닙니다: " + order.getOrderStatus()));
         }
+
+        order.getItems().size();
+
+        // 발송 시 사용된 창고 코드
+        String warehouseCode = AllocationController.getCurrentWarehouseCode();
+        if (warehouseCode == null || warehouseCode.isBlank()) {
+            log.warn("발송취소: 창고 코드 없음 — 재고 복구 없이 상태만 롤백 ({})", orderNo);
+        }
+
+        // 상품 캐시 로딩
+        List<Product> allProducts = productRepository.findAll();
+        Map<String, Product> skuMap     = new HashMap<>();
+        Map<String, Product> barcodeMap = new HashMap<>();
+        allProducts.forEach(p -> {
+            if (p.getSku()     != null) skuMap.put(p.getSku().toLowerCase(), p);
+            if (p.getBarcode() != null) barcodeMap.put(p.getBarcode().toLowerCase(), p);
+        });
+
+        int restored = 0;
+        for (OrderItem item : order.getItems()) {
+            String code = item.getProductCode();
+            if (code == null || code.isBlank()) continue;
+
+            Product product = skuMap.containsKey(code.toLowerCase())
+                ? skuMap.get(code.toLowerCase())
+                : barcodeMap.get(code.toLowerCase());
+            if (product == null) continue;
+
+            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            if (qty <= 0) continue;
+
+            try {
+                if (warehouseCode != null && !warehouseCode.isBlank()) {
+                    // InventoryService.processInboundWithWarehouse 로 재고 복구
+                    // 거래 내역도 자동 기록됨
+                    inventoryService.processInboundWithWarehouse(
+                        product.getProductId(), qty, warehouseCode,
+                        null, "발송취소 재고복구: " + orderNo
+                    );
+                } else {
+                    // 창고 정보 없으면 전체 입고로 복구
+                    inventoryService.processInbound(
+                        product.getProductId(), qty, null,
+                        "발송취소 재고복구 (창고미상): " + orderNo
+                    );
+                }
+                restored++;
+                log.info("재고 복구: {} × {}개 / 창고:{} ({})", product.getSku(), qty, warehouseCode, orderNo);
+            } catch (Exception e) {
+                log.error("재고 복구 실패: {} - {}", orderNo, e.getMessage());
+            }
+        }
+
         order.setOrderStatus(Order.OrderStatus.CONFIRMED);
         orderRepository.save(order);
-        log.info("발송취소: {} → CONFIRMED", orderNo);
-        return ResponseEntity.ok(Map.of("success", true, "message", "발송취소 완료"));
+        log.info("발송취소 완료: {} → CONFIRMED (재고복구 {}건)", orderNo, restored);
+
+        return ResponseEntity.ok(Map.of(
+            "success",  true,
+            "message",  "발송취소 완료 (재고 " + restored + "건 복구)",
+            "restored", restored
+        ));
     }
 
     /**
