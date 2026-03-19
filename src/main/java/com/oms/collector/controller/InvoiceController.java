@@ -52,7 +52,7 @@ public class InvoiceController {
         public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
             this.productName = i.getProductName();
             this.option      = i.getOptionName() != null ? i.getOptionName() : "";
-            this.barcode     = "";  // TODO: OrderItem 엔티티에 barcode 필드 추가 후 i.getBarcode() 로 교체
+            this.barcode     = i.getProductCode() != null ? i.getProductCode() : "";  // product_code = 바코드
             this.quantity    = i.getQuantity()   != null ? i.getQuantity()   : 1;
         }
     }
