@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/inventory")
+@RequestMapping("/api/mobile/inventory")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class InventoryApiController {
