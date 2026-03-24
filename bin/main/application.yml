@@ -77,3 +77,8 @@ collector:
   retry:
     max-attempts: 3
     delay: 5000  # 5초
+
+# 배송조회 설정
+delivery:
+  post-office:
+    api-key: fa54da790c9a4f4c291d48ee1f430d2de79b7942bbad6cde726902dc6659a25e
