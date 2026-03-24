@@ -92,7 +92,7 @@ public class InventoryApiController {
 
         public TransactionDTO(InventoryTransaction t) {
             this.transactionId = t.getTransactionId() != null ? t.getTransactionId().toString() : "";
-            this.type          = t.getTransactionType() != null ? t.getTransactionType().name() : "";
+            this.type          = t.getTransactionType() != null ? t.getTransactionType().toString() : "";
             this.productName   = t.getProduct() != null ? t.getProduct().getProductName() : "";
             this.sku           = t.getProduct() != null ? t.getProduct().getSku() : "";
             this.quantity      = t.getQuantity()    != null ? t.getQuantity()    : 0;
