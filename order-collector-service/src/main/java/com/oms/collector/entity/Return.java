@@ -16,7 +16,7 @@ import java.util.UUID;
  *           DEFECTIVE(불량) → ANYANG(국내온라인 반품) 이동
  */
 @Entity
-@Table(name = "returns")
+@Table(name = "product_returns")  // 'returns'는 PostgreSQL 예약어 → product_returns 사용
 @Getter @Setter
 @NoArgsConstructor
 @AllArgsConstructor
