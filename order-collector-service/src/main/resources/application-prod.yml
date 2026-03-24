@@ -84,13 +84,18 @@ management:
     readinessState:
       enabled: true
 
-# 로깅 설정 (프로덕션)
+# 로깅 설정 (프로덕션 - SQL 로그 완전 차단)
 logging:
   level:
-    root: INFO
+    root: WARN
     com.oms.collector: INFO
     org.springframework.web: WARN
-    org.hibernate: WARN
+    org.hibernate: ERROR
+    org.hibernate.SQL: OFF
+    org.hibernate.orm.jdbc.bind: OFF
+    org.hibernate.type.descriptor.sql: OFF
+    org.hibernate.engine.QueryParameters: OFF
+    org.hibernate.engine.query.HQLQueryPlan: OFF
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
