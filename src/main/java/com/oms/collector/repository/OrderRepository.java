@@ -92,6 +92,30 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     List<Object[]> getOrderStatisticsSince(@Param("since") LocalDateTime since);
     
     /**
+     * 상태 + 주문일자 기간 조회 (InvoiceController 사용)
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.orderedAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> findByOrderStatusAndDateRange(
+        @Param("status")    Order.OrderStatus status,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate")   LocalDateTime endDate
+    );
+
+    /**
+     * 상태 + updatedAt 기간 조회 (InvoiceController - 발송 완료 조회 사용)
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY o.updatedAt DESC")
+    List<Order> findByOrderStatusAndUpdatedAtRange(
+        @Param("status")    Order.OrderStatus status,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate")   LocalDateTime endDate
+    );
+
+    /**
      * CS 검색 — 발송일자(updatedAt) 기준 기간 조회
      */
     @Query("SELECT o FROM Order o WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
