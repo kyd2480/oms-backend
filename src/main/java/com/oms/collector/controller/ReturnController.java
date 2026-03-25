@@ -53,11 +53,19 @@ public class ReturnController {
     }
 
     public static class InspectRequest {
-        public String inspectResult;  // NORMAL | DEFECTIVE
-        public String warehouseCode;  // 입고 창고 (NORMAL 시 필수)
+        public String inspectResult;   // NORMAL | DEFECTIVE
+        public String warehouseCode;
         public String inspectMemo;
-        public String productSku;     // 재고 복구용 SKU (옵션)
-        public Integer restockQty;    // 재고 복구 수량 (옵션)
+        // 단일 (하위호환)
+        public String  productSku;
+        public Integer restockQty;
+        // 복수 상품 (체크박스 다중 선택)
+        public List<RestockItem> restockItems;
+
+        public static class RestockItem {
+            public String  productSku;
+            public Integer quantity;
+        }
     }
 
     public static class ResolveRequest {
@@ -199,37 +207,56 @@ public class ReturnController {
         ret.setInspectMemo(req.inspectMemo);
         ret.setStatus(ProductReturn.ReturnStatus.INSPECTING);
 
-        // 창고 결정: 정상 → 요청된 창고, 불량 → 안양(국내온라인 반품)
-        String warehouse = result == ProductReturn.InspectResult.DEFECTIVE
-            ? "ANYANG"
-            : (req.warehouseCode != null ? req.warehouseCode : "ANYANG");
+        // 창고 결정: 정상 → 요청된 창고, 불량 → 프론트에서 전달된 반품 창고
+        // (프론트에서 /api/warehouses/active 에서 반품 창고를 자동 탐지해서 전달)
+        String warehouse = req.warehouseCode != null && !req.warehouseCode.isBlank()
+            ? req.warehouseCode
+            : "ANYANG"; // fallback
         ret.setWarehouseCode(warehouse);
 
-        // 재고 복구 (SKU 입력 시)
-        String stockMsg = "";
-        if (req.productSku != null && !req.productSku.isBlank()
-            && req.restockQty != null && req.restockQty > 0) {
+        // 재고 복구 처리 (복수 상품 지원)
+        List<String> stockMsgs = new ArrayList<>();
+
+        // restockItems (복수) 우선, 없으면 단일 productSku 처리
+        List<InspectRequest.RestockItem> items = new ArrayList<>();
+        if (req.restockItems != null && !req.restockItems.isEmpty()) {
+            items = req.restockItems;
+        } else if (req.productSku != null && !req.productSku.isBlank()
+                   && req.restockQty != null && req.restockQty > 0) {
+            InspectRequest.RestockItem single = new InspectRequest.RestockItem();
+            single.productSku = req.productSku;
+            single.quantity   = req.restockQty;
+            items.add(single);
+        }
+
+        for (InspectRequest.RestockItem item : items) {
+            if (item.productSku == null || item.productSku.isBlank()) continue;
+            if (item.quantity  == null || item.quantity <= 0) continue;
             try {
-                List<Product> found = productRepository.searchProducts(req.productSku);
+                List<Product> found = productRepository.searchProducts(item.productSku);
                 Product product = found.stream()
-                    .filter(p -> req.productSku.equalsIgnoreCase(p.getSku())
-                              || req.productSku.equalsIgnoreCase(p.getBarcode()))
+                    .filter(p -> item.productSku.equalsIgnoreCase(p.getSku())
+                              || item.productSku.equalsIgnoreCase(p.getBarcode()))
                     .findFirst().orElse(found.isEmpty() ? null : found.get(0));
 
                 if (product != null) {
                     String notes = "반품 입고 (" + ret.getOrderNo() + ") "
                         + (result == ProductReturn.InspectResult.DEFECTIVE ? "[불량]" : "[정상]");
                     inventoryService.processInboundWithWarehouse(
-                        product.getProductId(), req.restockQty, warehouse, null, notes
+                        product.getProductId(), item.quantity, warehouse, null, notes
                     );
-                    stockMsg = product.getProductName() + " " + req.restockQty + "개 " + warehouse + " 입고 완료";
-                    log.info("반품 재고 복구: {}", stockMsg);
+                    stockMsgs.add(product.getProductName() + " " + item.quantity + "개 입고");
+                    log.info("반품 재고 복구: {} {}개 → {}", product.getSku(), item.quantity, warehouse);
+                } else {
+                    stockMsgs.add("SKU 없음: " + item.productSku);
                 }
             } catch (Exception e) {
                 log.warn("반품 재고 복구 실패: {}", e.getMessage());
-                stockMsg = "재고 복구 실패: " + e.getMessage();
+                stockMsgs.add("실패(" + item.productSku + "): " + e.getMessage());
             }
         }
+
+        String stockMsg = stockMsgs.isEmpty() ? "" : String.join(", ", stockMsgs);
 
         // 정상 반품이고 재고 처리까지 완료되면 바로 COMPLETED
         if (result == ProductReturn.InspectResult.NORMAL && !stockMsg.isBlank() && !stockMsg.contains("실패")) {
