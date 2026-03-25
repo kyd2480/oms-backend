@@ -21,7 +21,8 @@ import java.util.stream.Collectors;
 /**
  * 배송전 취소 관리 API
  *
- * GET  /api/cancel/orders           - 취소 주문 목록
+ * GET  /api/cancel/pending          - 취소 대기 주문 (PENDING/CONFIRMED)
+ * GET  /api/cancel/orders           - 취소 완료 주문 목록 (CANCELLED)
  * POST /api/cancel/orders/{orderNo} - 주문 취소 처리 (PENDING/CONFIRMED → CANCELLED)
  */
 @Slf4j
@@ -56,7 +57,40 @@ public class CancelController {
         }
     }
 
-    /* ── 취소 주문 목록 ──────────────────────────────── */
+    /* ── 취소 대기 주문 (PENDING + CONFIRMED) ─────────── */
+    @GetMapping("/pending")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<CancelOrderDTO>> pending(
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+        @RequestParam(required = false) String keyword
+    ) {
+        LocalDateTime start = (startDate != null ? startDate : LocalDate.now().minusWeeks(1)).atStartOfDay();
+        LocalDateTime end   = (endDate   != null ? endDate   : LocalDate.now()).atTime(23, 59, 59);
+
+        List<Order> orders = new ArrayList<>();
+        orders.addAll(orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.PENDING,   start, end));
+        orders.addAll(orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end));
+
+        if (keyword != null && !keyword.isBlank()) {
+            final String kw = keyword.trim().toLowerCase();
+            orders = orders.stream().filter(o ->
+                contains(o.getOrderNo(), kw)
+                || contains(o.getRecipientName(), kw)
+                || contains(o.getRecipientPhone(), kw)
+                || contains(getProductName(o), kw)
+            ).collect(Collectors.toList());
+        }
+
+        orders.sort((a, b) -> {
+            if (a.getOrderedAt() == null) return 1;
+            if (b.getOrderedAt() == null) return -1;
+            return b.getOrderedAt().compareTo(a.getOrderedAt());
+        });
+
+        return ResponseEntity.ok(orders.stream().map(this::toDTO).collect(Collectors.toList()));
+    }
+
     @GetMapping("/orders")
     @Transactional(readOnly = true)
     public ResponseEntity<List<CancelOrderDTO>> list(
