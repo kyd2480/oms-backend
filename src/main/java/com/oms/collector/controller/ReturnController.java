@@ -103,6 +103,7 @@ public class ReturnController {
         public String  createdAt;
         public String  updatedAt;
         public String  completedAt;
+        public String  stockedItems;  // 입고 내역 JSON (취소 시 차감용)
 
         public ReturnDTO(ProductReturn r) {
             this.returnId        = r.getReturnId().toString();
@@ -128,6 +129,7 @@ public class ReturnController {
             this.createdAt       = r.getCreatedAt()   != null ? r.getCreatedAt().toString()   : null;
             this.updatedAt       = r.getUpdatedAt()   != null ? r.getUpdatedAt().toString()   : null;
             this.completedAt     = r.getCompletedAt() != null ? r.getCompletedAt().toString() : null;
+            this.stockedItems    = r.getStockedItems();
         }
     }
 

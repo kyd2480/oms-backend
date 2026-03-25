@@ -116,6 +116,17 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     );
 
     /**
+     * 취소 주문 기간 조회 (updatedAt 기준 — 취소 처리 시점)
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = 'CANCELLED' " +
+           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY o.updatedAt DESC")
+    List<Order> findCancelledByDateRange(
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate")   LocalDateTime endDate
+    );
+
+    /**
      * CS 검색 — 발송일자(updatedAt) 기준 기간 조회
      */
     @Query("SELECT o FROM Order o WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
