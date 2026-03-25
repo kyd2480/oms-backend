@@ -46,10 +46,11 @@ public class ReturnController {
         public String recipientPhone;
         public String productName;
         public Integer quantity;
-        public String returnType;    // CANCEL | REFUND | EXCHANGE
+        public String returnType;
         public String returnReason;
         public String returnTrackingNo;
         public String carrierName;
+        public List<java.util.Map<String, Object>> items; // productCode 포함
     }
 
     public static class InspectRequest {
@@ -63,12 +64,13 @@ public class ReturnController {
         public List<RestockItem> restockItems;
 
         public static class RestockItem {
-            public String  productSku;    // SKU (있으면 우선)
+            public String  productSku;    // SKU
+            public String  productCode;   // 자사 상품코드 (바코드, 가장 정확)
             public String  productName;   // 상품명
             public String  optionName;    // 옵션명
             public Integer quantity;
-            public String  itemResult;    // NORMAL | DEFECTIVE (상품별 판정)
-            public String  warehouseCode; // 상품별 입고 창고 (프론트에서 계산해서 전달)
+            public String  itemResult;    // NORMAL | DEFECTIVE
+            public String  warehouseCode;
         }
     }
 
@@ -103,7 +105,8 @@ public class ReturnController {
         public String  createdAt;
         public String  updatedAt;
         public String  completedAt;
-        public String  stockedItems;  // 입고 내역 JSON (취소 시 차감용)
+        public String  stockedItems;
+        public List<java.util.Map<String, Object>> items; // productCode 포함
 
         public ReturnDTO(ProductReturn r) {
             this.returnId        = r.getReturnId().toString();
@@ -130,6 +133,19 @@ public class ReturnController {
             this.updatedAt       = r.getUpdatedAt()   != null ? r.getUpdatedAt().toString()   : null;
             this.completedAt     = r.getCompletedAt() != null ? r.getCompletedAt().toString() : null;
             this.stockedItems    = r.getStockedItems();
+            // itemsJson 파싱
+            if (r.getItemsJson() != null && !r.getItemsJson().isBlank()) {
+                try {
+                    this.items = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(r.getItemsJson(),
+                            new com.fasterxml.jackson.databind.ObjectMapper()
+                                .getTypeFactory().constructCollectionType(List.class, java.util.Map.class));
+                } catch (Exception e) {
+                    this.items = new ArrayList<>();
+                }
+            } else {
+                this.items = new ArrayList<>();
+            }
         }
     }
 
@@ -154,6 +170,16 @@ public class ReturnController {
             .status(ProductReturn.ReturnStatus.REQUESTED)
             .source("MANUAL")
             .build();
+
+        // items (productCode 포함) JSON 저장
+        if (req.items != null && !req.items.isEmpty()) {
+            try {
+                ret.setItemsJson(new com.fasterxml.jackson.databind.ObjectMapper()
+                    .writeValueAsString(req.items));
+            } catch (Exception e) {
+                log.warn("itemsJson 직렬화 실패: {}", e.getMessage());
+            }
+        }
 
         return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
     }
@@ -222,13 +248,20 @@ public class ReturnController {
         for (InspectRequest.RestockItem item : items) {
             if (item.quantity == null || item.quantity <= 0) continue;
 
-            String searchKey = (item.productSku != null && !item.productSku.isBlank())
-                ? item.productSku : item.productName;
+            // productCode(바코드) → SKU → 상품명 순으로 검색
+            String searchKey =
+                (item.productCode != null && !item.productCode.isBlank()) ? item.productCode :
+                (item.productSku  != null && !item.productSku.isBlank())  ? item.productSku  :
+                item.productName;
             if (searchKey == null || searchKey.isBlank()) continue;
 
             List<Product> found = productRepository.searchProducts(searchKey);
             Product product = found.stream()
                 .filter(p -> {
+                    if (item.productCode != null && !item.productCode.isBlank()) {
+                        return item.productCode.equalsIgnoreCase(p.getSku())
+                            || item.productCode.equalsIgnoreCase(p.getBarcode());
+                    }
                     if (item.productSku != null && !item.productSku.isBlank()) {
                         return item.productSku.equalsIgnoreCase(p.getSku())
                             || item.productSku.equalsIgnoreCase(p.getBarcode());

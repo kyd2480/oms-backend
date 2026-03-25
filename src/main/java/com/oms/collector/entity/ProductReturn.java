@@ -79,6 +79,14 @@ public class ProductReturn {
     private String inspectMemo;           // 검수 메모
 
     /**
+     * 반품 상품 목록 (JSON) — CS에서 넘어온 items (productCode 포함)
+     * 형식: [{"productName":"...","optionName":"...","quantity":1,"productCode":"XF001"}]
+     * 검수 시 productCode로 재고 매칭
+     */
+    @Column(name = "items_json", columnDefinition = "TEXT")
+    private String itemsJson;
+
+    /**
      * 검수 시 실제 입고된 상품 내역 (JSON)
      * 형식: [{"productId":"uuid","productName":"상품명","quantity":2,"warehouseCode":"ANYANG"}]
      * 취소 시 이 내역을 기반으로 출고 차감 처리

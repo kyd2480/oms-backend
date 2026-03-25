@@ -54,6 +54,7 @@ public class CsOrderController {
             public String productName;
             public String optionName;
             public int    quantity;
+            public String productCode;  // 자사 상품 코드 (바코드/SKU 역할)
         }
     }
 
@@ -158,6 +159,7 @@ public class CsOrderController {
                 item.productName = it.getProductName();
                 item.optionName  = it.getOptionName();
                 item.quantity    = it.getQuantity() != null ? it.getQuantity() : 0;
+                item.productCode = it.getProductCode();
                 return item;
               }).collect(Collectors.toList())
             : new ArrayList<>();
