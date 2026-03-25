@@ -26,14 +26,14 @@ public interface ProductReturnRepository extends JpaRepository<ProductReturn, UU
     List<ProductReturn> findByChannelNameOrderByCreatedAtDesc(String channelName);
 
     // 날짜 범위 조회
-    @Query("SELECT r FROM Return r WHERE r.createdAt BETWEEN :start AND :end ORDER BY r.createdAt DESC")
+    @Query("SELECT r FROM ProductReturn r WHERE r.createdAt BETWEEN :start AND :end ORDER BY r.createdAt DESC")
     List<ProductReturn> findByDateRange(
         @Param("start") LocalDateTime start,
         @Param("end")   LocalDateTime end
     );
 
     // 키워드 검색 (주문번호, 수령자, 상품명)
-    @Query("SELECT r FROM Return r WHERE " +
+    @Query("SELECT r FROM ProductReturn r WHERE " +
            "r.orderNo LIKE %:kw% OR r.recipientName LIKE %:kw% OR r.productName LIKE %:kw% " +
            "ORDER BY r.createdAt DESC")
     List<ProductReturn> searchByKeyword(@Param("kw") String keyword);
