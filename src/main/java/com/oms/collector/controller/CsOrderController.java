@@ -128,7 +128,16 @@ public class CsOrderController {
     private CsOrderDTO toDTO(Order o) {
         CsOrderDTO dto = new CsOrderDTO();
         dto.orderNo       = o.getOrderNo();
-        dto.channelName   = o.getChannel() != null ? o.getChannel().name() : null;
+        // SalesChannel은 엔티티이므로 toString() 또는 리플렉션으로 이름 추출
+        if (o.getChannel() != null) {
+            try {
+                // getName() 메서드가 있으면 사용, 없으면 toString()
+                java.lang.reflect.Method m = o.getChannel().getClass().getMethod("getName");
+                dto.channelName = (String) m.invoke(o.getChannel());
+            } catch (Exception e) {
+                dto.channelName = o.getChannel().toString();
+            }
+        }
         dto.recipientName = o.getRecipientName();
         dto.recipientPhone= o.getRecipientPhone();
         dto.address       = o.getAddress();
