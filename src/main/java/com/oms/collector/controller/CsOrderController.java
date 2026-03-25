@@ -18,11 +18,12 @@ import java.util.stream.Collectors;
 /**
  * CS 관리 전용 주문 검색 API
  *
- * GET /api/cs/orders?startDate=&endDate=&keyword=&searchType=
- *
- * - 모든 상태(PENDING/CONFIRMED/SHIPPED)의 주문을 검색
- * - 주문번호, 수취인, 연락처, 상품명, 송장번호로 검색 가능
- * - 날짜 범위 기반 조회
+ * GET /api/cs/orders
+ *   ?startDate=2026-01-01   날짜 범위 시작
+ *   &endDate=2026-03-26     날짜 범위 끝
+ *   &dateType=ordered       ordered(주문일자) | shipped(발송일자)
+ *   &searchType=주문번호     통합검색|주문번호|수취인|연락처|송장번호|상품명
+ *   &keyword=OMS-2026       검색어
  */
 @Slf4j
 @RestController
@@ -39,9 +40,9 @@ public class CsOrderController {
         public String  recipientName;
         public String  recipientPhone;
         public String  address;
-        public String  productName;      // 상품명 합본
+        public String  productName;
         public int     quantity;
-        public String  orderStatus;      // PENDING / CONFIRMED / SHIPPED
+        public String  orderStatus;
         public String  orderedAt;
         public String  shippedAt;
         public String  carrierCode;
@@ -56,161 +57,149 @@ public class CsOrderController {
         }
     }
 
-    /**
-     * CS 주문 검색
-     * GET /api/cs/orders?startDate=2026-01-01&endDate=2026-03-26&keyword=OMS-2026&searchType=orderNo
-     */
     @GetMapping("/orders")
     @Transactional(readOnly = true)
     public ResponseEntity<List<CsOrderDTO>> search(
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-        @RequestParam(required = false) String keyword,
-        @RequestParam(required = false, defaultValue = "all") String searchType
+        @RequestParam(required = false, defaultValue = "ordered") String dateType,
+        @RequestParam(required = false, defaultValue = "통합검색") String searchType,
+        @RequestParam(required = false) String keyword
     ) {
-        // 날짜 기본값: 오늘 기준 1개월
-        LocalDateTime start = (startDate != null ? startDate : LocalDate.now().minusMonths(1))
-            .atStartOfDay();
-        LocalDateTime end   = (endDate   != null ? endDate   : LocalDate.now())
-            .atTime(23, 59, 59);
+        LocalDateTime start = (startDate != null ? startDate : LocalDate.now().minusWeeks(1)).atStartOfDay();
+        LocalDateTime end   = (endDate   != null ? endDate   : LocalDate.now()).atTime(23, 59, 59);
 
-        List<Order> orders = orderRepository.findByDateRange(start, end);
+        boolean isShippedDate = "shipped".equalsIgnoreCase(dateType) || "발송일자".equals(dateType);
+        boolean isTracking    = "송장번호".equals(searchType) || "trackingno".equalsIgnoreCase(searchType);
+        boolean hasKeyword    = keyword != null && !keyword.isBlank();
+        final String kw       = hasKeyword ? keyword.trim().toLowerCase() : "";
 
-        // 키워드 필터
-        if (keyword != null && !keyword.isBlank()) {
-            final String kw = keyword.trim().toLowerCase();
-            orders = orders.stream().filter(o -> {
-                switch (searchType.toLowerCase()) {
-                    case "orderno":
-                    case "주문번호":
-                        return o.getOrderNo() != null &&
-                               o.getOrderNo().toLowerCase().contains(kw);
-                    case "recipientname":
-                    case "수취인":
-                        return o.getRecipientName() != null &&
-                               o.getRecipientName().toLowerCase().contains(kw);
-                    case "recipientphone":
-                    case "연락처":
-                        return o.getRecipientPhone() != null &&
-                               o.getRecipientPhone().toLowerCase().contains(kw);
-                    case "trackingno":
-                    case "송장번호":
-                        return getTrackingNo(o) != null &&
-                               getTrackingNo(o).toLowerCase().contains(kw);
-                    case "productname":
-                    case "상품명":
-                        return getProductName(o) != null &&
-                               getProductName(o).toLowerCase().contains(kw);
-                    default: // 통합검색
-                        return contains(o.getOrderNo(), kw)
+        List<Order> orders;
+
+        if (isTracking && hasKeyword) {
+            if (isShippedDate) {
+                // 발송일자 기준 + 송장번호 검색
+                orders = orderRepository.findShippedByDateRange(start, end).stream()
+                    .filter(o -> contains(getTrackingNo(o), kw))
+                    .collect(Collectors.toList());
+            } else {
+                // 주문일자 기준 + 송장번호 검색 (DB LIKE 쿼리)
+                orders = orderRepository.findByDateRangeAndTracking(start, end, keyword.trim());
+            }
+        } else if (isShippedDate) {
+            // 발송일자 기준 (SHIPPED 주문의 updatedAt)
+            orders = orderRepository.findShippedByDateRange(start, end);
+            if (hasKeyword) orders = filterByKeyword(orders, searchType, kw);
+        } else {
+            // 주문일자 기준 (기본)
+            orders = orderRepository.findByDateRange(start, end);
+            if (hasKeyword) orders = filterByKeyword(orders, searchType, kw);
+        }
+
+        // 정렬
+        orders.sort((a, b) -> {
+            LocalDateTime da = isShippedDate ? a.getUpdatedAt() : a.getOrderedAt();
+            LocalDateTime db = isShippedDate ? b.getUpdatedAt() : b.getOrderedAt();
+            if (da == null) return 1;
+            if (db == null) return -1;
+            return db.compareTo(da);
+        });
+
+        log.info("CS 주문 검색: dateType={}, searchType={}, keyword={}, 결과={}건",
+            dateType, searchType, keyword, orders.size());
+
+        return ResponseEntity.ok(orders.stream().map(this::toDTO).collect(Collectors.toList()));
+    }
+
+    private List<Order> filterByKeyword(List<Order> orders, String searchType, String kw) {
+        return orders.stream().filter(o -> switch (searchType) {
+            case "주문번호" -> contains(o.getOrderNo(), kw);
+            case "수취인"   -> contains(o.getRecipientName(), kw);
+            case "연락처"   -> contains(o.getRecipientPhone(), kw);
+            case "상품명"   -> contains(getProductName(o), kw);
+            case "송장번호" -> contains(getTrackingNo(o), kw);
+            default         -> contains(o.getOrderNo(), kw)
                             || contains(o.getRecipientName(), kw)
                             || contains(o.getRecipientPhone(), kw)
                             || contains(getProductName(o), kw)
                             || contains(getTrackingNo(o), kw);
-                }
-            }).collect(Collectors.toList());
-        }
-
-        // 최신순 정렬
-        orders.sort((a, b2) -> {
-            if (a.getOrderedAt() == null) return 1;
-            if (b2.getOrderedAt() == null) return -1;
-            return b2.getOrderedAt().compareTo(a.getOrderedAt());
-        });
-
-        return ResponseEntity.ok(
-            orders.stream().map(this::toDTO).collect(Collectors.toList())
-        );
+        }).collect(Collectors.toList());
     }
-
-    /* ── 변환 ─────────────────────────────────────────── */
 
     private CsOrderDTO toDTO(Order o) {
         CsOrderDTO dto = new CsOrderDTO();
-        dto.orderNo       = o.getOrderNo();
-        // SalesChannel 이름 추출 - getName() 또는 getChannelName() 시도
+        dto.orderNo        = o.getOrderNo();
+        dto.recipientName  = o.getRecipientName();
+        dto.recipientPhone = o.getRecipientPhone();
+        dto.address        = o.getAddress();
+        dto.orderStatus    = o.getOrderStatus() != null ? o.getOrderStatus().name() : "PENDING";
+        dto.orderedAt      = o.getOrderedAt() != null ? o.getOrderedAt().toString() : null;
+        dto.shippedAt      = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : null;
+
+        // SalesChannel 이름 추출
         if (o.getChannel() != null) {
-            String chName = null;
-            for (String method : new String[]{"getName","getChannelName","getDisplayName"}) {
+            for (String m : new String[]{"getName","getChannelName","getDisplayName"}) {
                 try {
-                    java.lang.reflect.Method m = o.getChannel().getClass().getMethod(method);
-                    Object val = m.invoke(o.getChannel());
-                    if (val instanceof String && !((String)val).isBlank()) {
-                        chName = (String) val; break;
-                    }
+                    Object val = o.getChannel().getClass().getMethod(m).invoke(o.getChannel());
+                    if (val instanceof String s && !s.isBlank()) { dto.channelName = s; break; }
                 } catch (Exception ignored) {}
             }
-            dto.channelName = chName; // null이면 프론트에서 '-' 표시
         }
-        dto.recipientName = o.getRecipientName();
-        dto.recipientPhone= o.getRecipientPhone();
-        dto.address       = o.getAddress();
-        dto.orderStatus   = o.getOrderStatus() != null ? o.getOrderStatus().name() : "PENDING";
-        dto.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : null;
 
-        // 상품명 합본
         dto.productName = getProductName(o);
         dto.quantity    = o.getItems() != null
-            ? o.getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum()
-            : 0;
+            ? o.getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum() : 0;
 
-        // 송장 정보 (deliveryMemo에서 파싱)
         parseDeliveryMemo(o, dto);
 
-        // 아이템 목록
-        if (o.getItems() != null) {
-            dto.items = o.getItems().stream().map(it -> {
+        dto.items = o.getItems() != null
+            ? o.getItems().stream().map(it -> {
                 CsOrderDTO.ItemDTO item = new CsOrderDTO.ItemDTO();
                 item.productName = it.getProductName();
                 item.optionName  = it.getOptionName();
                 item.quantity    = it.getQuantity() != null ? it.getQuantity() : 0;
                 return item;
-            }).collect(Collectors.toList());
-        } else {
-            dto.items = new ArrayList<>();
-        }
+              }).collect(Collectors.toList())
+            : new ArrayList<>();
 
         return dto;
     }
 
-    /**
-     * deliveryMemo에서 송장 정보 파싱
-     * 형식: "INVOICE:CARRIER:POST:CARRIER_NAME:우체국택배:TRACKING:1234567890:SHIPPED_AT:2026-03-17T..."
-     */
+    // 형식: "INVOICE:CARRIER:CJ|CARRIER_NAME:CJ대한통운|TRACKING:1234567890"
     private void parseDeliveryMemo(Order o, CsOrderDTO dto) {
         String memo = o.getDeliveryMemo();
         if (memo == null || !memo.startsWith("INVOICE:")) return;
         try {
-            String[] parts = memo.split(":");
-            for (int i = 0; i < parts.length - 1; i++) {
-                switch (parts[i]) {
-                    case "CARRIER"      -> dto.carrierCode  = parts[i+1];
-                    case "CARRIER_NAME" -> dto.carrierName  = parts[i+1];
-                    case "TRACKING"     -> dto.trackingNo   = parts[i+1];
-                    case "SHIPPED_AT"   -> dto.shippedAt    = parts[i+1];
+            for (String seg : memo.substring("INVOICE:".length()).split("\\|")) {
+                String[] kv = seg.split(":", 2);
+                if (kv.length < 2) continue;
+                switch (kv[0].trim()) {
+                    case "CARRIER"      -> dto.carrierCode = kv[1].trim();
+                    case "CARRIER_NAME" -> dto.carrierName = kv[1].trim();
+                    case "TRACKING"     -> dto.trackingNo  = kv[1].trim();
                 }
             }
         } catch (Exception ignored) {}
-    }
-
-    private String getProductName(Order o) {
-        if (o.getItems() == null || o.getItems().isEmpty()) return null;
-        return o.getItems().stream()
-            .map(OrderItem::getProductName)
-            .filter(Objects::nonNull)
-            .collect(Collectors.joining(", "));
     }
 
     private String getTrackingNo(Order o) {
         String memo = o.getDeliveryMemo();
         if (memo == null || !memo.contains("TRACKING:")) return null;
         try {
-            String[] parts = memo.split(":");
-            for (int i = 0; i < parts.length - 1; i++) {
-                if ("TRACKING".equals(parts[i])) return parts[i+1];
+            String body = memo.startsWith("INVOICE:") ? memo.substring("INVOICE:".length()) : memo;
+            for (String seg : body.split("\\|")) {
+                String[] kv = seg.split(":", 2);
+                if (kv.length == 2 && "TRACKING".equals(kv[0].trim())) return kv[1].trim();
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    private String getProductName(Order o) {
+        if (o.getItems() == null || o.getItems().isEmpty()) return null;
+        return o.getItems().stream()
+            .map(OrderItem::getProductName).filter(Objects::nonNull)
+            .collect(Collectors.joining(", "));
     }
 
     private boolean contains(String val, String kw) {

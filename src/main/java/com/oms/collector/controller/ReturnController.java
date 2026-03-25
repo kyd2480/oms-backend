@@ -269,7 +269,14 @@ public class ReturnController {
                     stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + itemWarehouse);
                     log.info("반품 재고 복구: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
                 } else {
-                    stockMsgs.add("상품 미매칭: " + searchKey);
+                    // 상품 미매칭 — 처리 중단
+                    String itemName = item.productName != null ? item.productName : searchKey;
+                    log.warn("반품 상품 미매칭: searchKey={}", searchKey);
+                    Map<String, Object> errRes = new LinkedHashMap<>();
+                    errRes.put("success", false);
+                    errRes.put("stockMessage", "상품을 찾을 수 없습니다: [" + itemName + "]\n"
+                        + "재고 관리에서 해당 상품의 상품명 또는 SKU를 확인해주세요.");
+                    return ResponseEntity.ok(errRes);
                 }
             } catch (Exception e) {
                 log.warn("반품 재고 복구 실패: {}", e.getMessage());

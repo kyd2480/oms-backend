@@ -44,30 +44,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * 상태별 주문 조회 (페이지네이션)
      */
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
-
-    /**
-     * 상태 + 기간별 주문 조회
-     */
-    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
-           "AND o.orderedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.orderedAt DESC")
-    List<Order> findByOrderStatusAndDateRange(
-        @Param("status") Order.OrderStatus status,
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate") LocalDateTime endDate
-    );
-
-    /**
-     * 상태 + 기간별 주문 조회 (updatedAt 기준 — 발송완료 등 상태변경 시각 기준)
-     */
-    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
-           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.updatedAt DESC")
-    List<Order> findByOrderStatusAndUpdatedAtRange(
-        @Param("status") Order.OrderStatus status,
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate") LocalDateTime endDate
-    );
     
     /**
      * 기간별 주문 조회
@@ -115,6 +91,29 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
            "GROUP BY CAST(o.orderedAt AS LocalDate) ORDER BY CAST(o.orderedAt AS LocalDate) DESC")
     List<Object[]> getOrderStatisticsSince(@Param("since") LocalDateTime since);
     
+    /**
+     * CS 검색 — 발송일자(updatedAt) 기준 기간 조회
+     */
+    @Query("SELECT o FROM Order o WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
+           "AND o.orderStatus = 'SHIPPED' " +
+           "ORDER BY o.updatedAt DESC")
+    List<Order> findShippedByDateRange(
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate")   LocalDateTime endDate
+    );
+
+    /**
+     * CS 검색 — 기간 + deliveryMemo의 송장번호 포함 검색 (주문일자 기준)
+     */
+    @Query("SELECT o FROM Order o WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
+           "AND o.deliveryMemo LIKE %:tracking% " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> findByDateRangeAndTracking(
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate")   LocalDateTime endDate,
+        @Param("tracking")  String tracking
+    );
+
     /**
      * 특정 날짜의 마지막 주문번호 조회 (시퀀스 생성용)
      * 
