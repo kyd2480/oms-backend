@@ -209,88 +209,87 @@ public class ReturnController {
         ProductReturn.InspectResult result = ProductReturn.InspectResult.valueOf(req.inspectResult);
         ret.setInspectResult(result);
         ret.setInspectMemo(req.inspectMemo);
-        ret.setStatus(ProductReturn.ReturnStatus.INSPECTING);
+        ret.setWarehouseCode(req.warehouseCode);
 
-        // 창고 결정: 정상 → 요청된 창고, 불량 → 프론트에서 전달된 반품 창고
-        // (프론트에서 /api/warehouses/active 에서 반품 창고를 자동 탐지해서 전달)
-        String warehouse = req.warehouseCode != null && !req.warehouseCode.isBlank()
-            ? req.warehouseCode
-            : "ANYANG"; // fallback
-        ret.setWarehouseCode(warehouse);
+        List<InspectRequest.RestockItem> items =
+            (req.restockItems != null && !req.restockItems.isEmpty())
+                ? req.restockItems : new ArrayList<>();
 
-        // 재고 복구 처리 (복수 상품 지원)
-        List<String> stockMsgs = new ArrayList<>();
-
-        // restockItems (복수) 우선, 없으면 단일 productSku 처리
-        List<InspectRequest.RestockItem> items = new ArrayList<>();
-        if (req.restockItems != null && !req.restockItems.isEmpty()) {
-            items = req.restockItems;
-        } else if (req.productSku != null && !req.productSku.isBlank()
-                   && req.restockQty != null && req.restockQty > 0) {
-            InspectRequest.RestockItem single = new InspectRequest.RestockItem();
-            single.productSku = req.productSku;
-            single.quantity   = req.restockQty;
-            items.add(single);
-        }
-
+        // ── 1단계: 모든 상품 매칭 검증 (하나라도 실패하면 전체 중단) ──
+        Map<InspectRequest.RestockItem, Product> matched = new LinkedHashMap<>();
         for (InspectRequest.RestockItem item : items) {
             if (item.quantity == null || item.quantity <= 0) continue;
 
-            // 상품별 입고 창고: restockItem에 지정된 창고 우선, 없으면 req.warehouseCode
-            String itemWarehouse = (item.warehouseCode != null && !item.warehouseCode.isBlank())
-                ? item.warehouseCode
-                : warehouse;
-
-            // SKU 또는 상품명으로 검색
             String searchKey = (item.productSku != null && !item.productSku.isBlank())
-                ? item.productSku
-                : item.productName;
+                ? item.productSku : item.productName;
             if (searchKey == null || searchKey.isBlank()) continue;
 
-            try {
-                List<Product> found = productRepository.searchProducts(searchKey);
-                Product product = found.stream()
-                    .filter(p -> {
-                        if (item.productSku != null && !item.productSku.isBlank()) {
-                            return item.productSku.equalsIgnoreCase(p.getSku())
-                                || item.productSku.equalsIgnoreCase(p.getBarcode());
-                        }
-                        return p.getProductName() != null &&
-                               p.getProductName().contains(searchKey.trim());
-                    })
-                    .findFirst().orElse(found.isEmpty() ? null : found.get(0));
+            List<Product> found = productRepository.searchProducts(searchKey);
+            Product product = found.stream()
+                .filter(p -> {
+                    if (item.productSku != null && !item.productSku.isBlank()) {
+                        return item.productSku.equalsIgnoreCase(p.getSku())
+                            || item.productSku.equalsIgnoreCase(p.getBarcode());
+                    }
+                    return p.getProductName() != null &&
+                           p.getProductName().contains(searchKey.trim());
+                })
+                .findFirst().orElse(found.isEmpty() ? null : found.get(0));
 
-                if (product != null) {
-                    String notes = "반품 입고 (" + ret.getOrderNo() + ") "
-                        + ("DEFECTIVE".equals(item.itemResult) ? "[불량]" : "[정상]");
-                    inventoryService.processInboundWithWarehouse(
-                        product.getProductId(), item.quantity, itemWarehouse, null, notes
-                    );
-                    stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + itemWarehouse);
-                    log.info("반품 재고 복구: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
-                } else {
-                    // 상품 미매칭 — 처리 중단
-                    String itemName = item.productName != null ? item.productName : searchKey;
-                    log.warn("반품 상품 미매칭: searchKey={}", searchKey);
-                    Map<String, Object> errRes = new LinkedHashMap<>();
-                    errRes.put("success", false);
-                    errRes.put("stockMessage", "상품을 찾을 수 없습니다: [" + itemName + "]\n"
-                        + "재고 관리에서 해당 상품의 상품명 또는 SKU를 확인해주세요.");
-                    return ResponseEntity.ok(errRes);
-                }
-            } catch (Exception e) {
-                log.warn("반품 재고 복구 실패: {}", e.getMessage());
-                stockMsgs.add("실패(" + item.productSku + "): " + e.getMessage());
+            if (product == null) {
+                log.warn("반품 상품 미매칭: searchKey={}", searchKey);
+                Map<String, Object> errRes = new LinkedHashMap<>();
+                errRes.put("success", false);
+                errRes.put("stockMessage",
+                    "상품을 찾을 수 없습니다: [" + (item.productName != null ? item.productName : searchKey) + "]\n"
+                    + "재고 관리에서 해당 상품의 상품명 또는 SKU를 확인해주세요.");
+                return ResponseEntity.ok(errRes);
             }
+            matched.put(item, product);
         }
 
-        String stockMsg = stockMsgs.isEmpty() ? "" : String.join(", ", stockMsgs);
+        // ── 2단계: 전체 매칭 성공 → 입고 처리 + 내역 저장 ──
+        List<String> stockMsgs  = new ArrayList<>();
+        List<Map<String,Object>> stockedList = new ArrayList<>(); // 취소 시 차감용
 
-        // 불량 상품이 하나라도 있으면 INSPECTING (환불/교환 처리 대기)
-        // 전체 정상이면 COMPLETED
-        boolean hasDefective = req.restockItems != null &&
-            req.restockItems.stream().anyMatch(it -> "DEFECTIVE".equals(it.itemResult));
+        for (Map.Entry<InspectRequest.RestockItem, Product> e : matched.entrySet()) {
+            InspectRequest.RestockItem item = e.getKey();
+            Product product = e.getValue();
 
+            String itemWarehouse = (item.warehouseCode != null && !item.warehouseCode.isBlank())
+                ? item.warehouseCode : req.warehouseCode;
+
+            String notes = "반품 입고 (" + ret.getOrderNo() + ") "
+                + ("DEFECTIVE".equals(item.itemResult) ? "[불량]" : "[정상]");
+
+            inventoryService.processInboundWithWarehouse(
+                product.getProductId(), item.quantity, itemWarehouse, null, notes
+            );
+
+            // 취소 시 차감을 위해 내역 저장
+            Map<String,Object> record = new LinkedHashMap<>();
+            record.put("productId",    product.getProductId().toString());
+            record.put("productName",  product.getProductName());
+            record.put("sku",          product.getSku());
+            record.put("quantity",     item.quantity);
+            record.put("warehouseCode", itemWarehouse);
+            record.put("itemResult",   item.itemResult);
+            stockedList.add(record);
+
+            stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + itemWarehouse);
+            log.info("반품 입고: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
+        }
+
+        // 입고 내역 JSON으로 저장
+        try {
+            ret.setStockedItems(new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(stockedList));
+        } catch (Exception ex) {
+            log.warn("stockedItems 직렬화 실패: {}", ex.getMessage());
+        }
+
+        // 불량 하나라도 → INSPECTING(환불/교환 대기), 전체 정상 → COMPLETED
+        boolean hasDefective = items.stream().anyMatch(it -> "DEFECTIVE".equals(it.itemResult));
         if (hasDefective) {
             ret.setStatus(ProductReturn.ReturnStatus.INSPECTING);
         } else {
@@ -303,7 +302,7 @@ public class ReturnController {
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("success", true);
         res.put("return", new ReturnDTO(ret));
-        res.put("stockMessage", stockMsg.isBlank() ? "재고 처리 없음 (SKU 미입력)" : stockMsg);
+        res.put("stockMessage", stockMsgs.isEmpty() ? "재고 처리 없음" : String.join(", ", stockMsgs));
         return ResponseEntity.ok(res);
     }
 
@@ -332,11 +331,55 @@ public class ReturnController {
 
     @PutMapping("/{id}/cancel")
     @Transactional
-    public ResponseEntity<ReturnDTO> cancel(@PathVariable UUID id) {
+    public ResponseEntity<Map<String, Object>> cancel(@PathVariable UUID id) {
         ProductReturn ret = returnRepository.findById(id)
             .orElseThrow(() -> new RuntimeException("반품을 찾을 수 없습니다: " + id));
+
+        List<String> rollbackMsgs = new ArrayList<>();
+
+        // 입고 내역이 있으면 출고 차감 (롤백)
+        if (ret.getStockedItems() != null && !ret.getStockedItems().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+                List<Map<String, Object>> stockedList = mapper.readValue(
+                    ret.getStockedItems(),
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class)
+                );
+
+                for (Map<String, Object> record : stockedList) {
+                    UUID productId    = UUID.fromString((String) record.get("productId"));
+                    int  quantity     = ((Number) record.get("quantity")).intValue();
+                    String warehouse  = (String) record.get("warehouseCode");
+                    String productName= (String) record.get("productName");
+
+                    try {
+                        inventoryService.processOutboundWithWarehouse(
+                            productId, quantity, warehouse, null,
+                            "반품 취소 차감 (" + ret.getOrderNo() + ")"
+                        );
+                        rollbackMsgs.add(productName + " " + quantity + "개 차감 ← " + warehouse);
+                        log.info("반품 취소 차감: {} {}개 ← {}", productName, quantity, warehouse);
+                    } catch (Exception e) {
+                        rollbackMsgs.add(productName + " 차감 실패: " + e.getMessage());
+                        log.warn("반품 취소 차감 실패: productId={}, {}", productId, e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("stockedItems 파싱 실패: {}", e.getMessage());
+            }
+        }
+
         ret.setStatus(ProductReturn.ReturnStatus.CANCELLED);
-        return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
+        returnRepository.save(ret);
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("success", true);
+        res.put("return", new ReturnDTO(ret));
+        res.put("rollbackMessage", rollbackMsgs.isEmpty()
+            ? "입고 내역 없음 (재고 차감 없음)"
+            : String.join(", ", rollbackMsgs));
+        return ResponseEntity.ok(res);
     }
 
     /* ── 통계 ─────────────────────────────────────────── */

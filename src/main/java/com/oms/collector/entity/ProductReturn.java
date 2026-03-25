@@ -78,6 +78,14 @@ public class ProductReturn {
     @Column(name = "inspect_memo", columnDefinition = "TEXT")
     private String inspectMemo;           // 검수 메모
 
+    /**
+     * 검수 시 실제 입고된 상품 내역 (JSON)
+     * 형식: [{"productId":"uuid","productName":"상품명","quantity":2,"warehouseCode":"ANYANG"}]
+     * 취소 시 이 내역을 기반으로 출고 차감 처리
+     */
+    @Column(name = "stocked_items", columnDefinition = "TEXT")
+    private String stockedItems;
+
     /* ── 환불/교환 ─────────────────────────────────── */
     @Enumerated(EnumType.STRING)
     @Column(name = "resolution_type", length = 20)
