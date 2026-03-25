@@ -63,8 +63,12 @@ public class ReturnController {
         public List<RestockItem> restockItems;
 
         public static class RestockItem {
-            public String  productSku;
+            public String  productSku;    // SKU (있으면 우선)
+            public String  productName;   // 상품명
+            public String  optionName;    // 옵션명
             public Integer quantity;
+            public String  itemResult;    // NORMAL | DEFECTIVE (상품별 판정)
+            public String  warehouseCode; // 상품별 입고 창고 (프론트에서 계산해서 전달)
         }
     }
 
@@ -230,25 +234,42 @@ public class ReturnController {
         }
 
         for (InspectRequest.RestockItem item : items) {
-            if (item.productSku == null || item.productSku.isBlank()) continue;
-            if (item.quantity  == null || item.quantity <= 0) continue;
+            if (item.quantity == null || item.quantity <= 0) continue;
+
+            // 상품별 입고 창고: restockItem에 지정된 창고 우선, 없으면 req.warehouseCode
+            String itemWarehouse = (item.warehouseCode != null && !item.warehouseCode.isBlank())
+                ? item.warehouseCode
+                : warehouse;
+
+            // SKU 또는 상품명으로 검색
+            String searchKey = (item.productSku != null && !item.productSku.isBlank())
+                ? item.productSku
+                : item.productName;
+            if (searchKey == null || searchKey.isBlank()) continue;
+
             try {
-                List<Product> found = productRepository.searchProducts(item.productSku);
+                List<Product> found = productRepository.searchProducts(searchKey);
                 Product product = found.stream()
-                    .filter(p -> item.productSku.equalsIgnoreCase(p.getSku())
-                              || item.productSku.equalsIgnoreCase(p.getBarcode()))
+                    .filter(p -> {
+                        if (item.productSku != null && !item.productSku.isBlank()) {
+                            return item.productSku.equalsIgnoreCase(p.getSku())
+                                || item.productSku.equalsIgnoreCase(p.getBarcode());
+                        }
+                        return p.getProductName() != null &&
+                               p.getProductName().contains(searchKey.trim());
+                    })
                     .findFirst().orElse(found.isEmpty() ? null : found.get(0));
 
                 if (product != null) {
                     String notes = "반품 입고 (" + ret.getOrderNo() + ") "
-                        + (result == ProductReturn.InspectResult.DEFECTIVE ? "[불량]" : "[정상]");
+                        + ("DEFECTIVE".equals(item.itemResult) ? "[불량]" : "[정상]");
                     inventoryService.processInboundWithWarehouse(
-                        product.getProductId(), item.quantity, warehouse, null, notes
+                        product.getProductId(), item.quantity, itemWarehouse, null, notes
                     );
-                    stockMsgs.add(product.getProductName() + " " + item.quantity + "개 입고");
-                    log.info("반품 재고 복구: {} {}개 → {}", product.getSku(), item.quantity, warehouse);
+                    stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + itemWarehouse);
+                    log.info("반품 재고 복구: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
                 } else {
-                    stockMsgs.add("SKU 없음: " + item.productSku);
+                    stockMsgs.add("상품 미매칭: " + searchKey);
                 }
             } catch (Exception e) {
                 log.warn("반품 재고 복구 실패: {}", e.getMessage());
@@ -258,8 +279,14 @@ public class ReturnController {
 
         String stockMsg = stockMsgs.isEmpty() ? "" : String.join(", ", stockMsgs);
 
-        // 정상 반품이고 재고 처리까지 완료되면 바로 COMPLETED
-        if (result == ProductReturn.InspectResult.NORMAL && !stockMsg.isBlank() && !stockMsg.contains("실패")) {
+        // 불량 상품이 하나라도 있으면 INSPECTING (환불/교환 처리 대기)
+        // 전체 정상이면 COMPLETED
+        boolean hasDefective = req.restockItems != null &&
+            req.restockItems.stream().anyMatch(it -> "DEFECTIVE".equals(it.itemResult));
+
+        if (hasDefective) {
+            ret.setStatus(ProductReturn.ReturnStatus.INSPECTING);
+        } else {
             ret.setStatus(ProductReturn.ReturnStatus.COMPLETED);
             ret.setCompletedAt(LocalDateTime.now());
         }
