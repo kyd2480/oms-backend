@@ -23,10 +23,10 @@ import java.util.UUID;
  * 재고 관리 Service
  *
  * 변경사항 (기존 코드 대비):
- *   1. WarehouseRepository 주입 추가
- *   2. processInboundWithWarehouse  - switch 하드코딩 → DB 창고 조회로 교체
- *   3. processOutboundWithWarehouse - switch 하드코딩 → DB 창고 조회로 교체
- *   4. 나머지 메서드 전부 동일
+ * 1. WarehouseRepository 주입 추가
+ * 2. processInboundWithWarehouse - switch 하드코딩 → DB 창고 조회로 교체
+ * 3. processOutboundWithWarehouse - switch 하드코딩 → DB 창고 조회로 교체
+ * 4. 나머지 메서드 전부 동일
  */
 @Slf4j
 @Service
@@ -39,31 +39,31 @@ public class InventoryService {
     private final ProductWarehouseStockRepository warehouseStockRepository; // ✅ 창고별 재고
 
     // 레거시 Product 컬럼과 매핑되는 창고 코드 (기존 3개만 유지)
-    private static final String ANYANG  = "ANYANG";
-    private static final String ICHEON  = "ICHEON_BOX";
-    private static final String ICHEON2 = "ICHEON_PCS";   // 별칭 혹은 레거시
+    private static final String ANYANG = "ANYANG";
+    private static final String ICHEON = "ICHEON_BOX";
+    private static final String ICHEON2 = "ICHEON_PCS"; // 별칭 혹은 레거시
     private static final String BUCHEON = "BUCHEON";
 
     /**
      * 입고 처리 (창고별)
      *
      * warehouse 파라미터: 기존 "1.본사(안양)" 같은 문자열 대신
-     *                     창고 코드 "ANYANG" 방식으로 변경
-     *                     (프론트에서 warehouse.code 전송)
+     * 창고 코드 "ANYANG" 방식으로 변경
+     * (프론트에서 warehouse.code 전송)
      */
     @Transactional
     public Product processInboundWithWarehouse(UUID productId, int quantity,
-                                               String warehouseCode, String location, String notes) {
+            String warehouseCode, String location, String notes) {
         log.info("📦 입고 처리 (창고별): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouseCode);
 
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
         // ✅ DB에서 창고 조회 (하드코딩 switch 완전 대체)
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
-            .filter(w -> Boolean.TRUE.equals(w.getIsActive()))
-            .orElseThrow(() -> new IllegalArgumentException(
-                "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
+                .filter(w -> Boolean.TRUE.equals(w.getIsActive()))
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
 
         // ANYANG / ICHEON_BOX / ICHEON_PCS / BUCHEON 은 Product 레거시 컬럼
         // 그 외 모든 창고는 product_warehouse_stock 테이블
@@ -81,7 +81,7 @@ public class InventoryService {
             default:
                 // 신규 창고 전부: product_warehouse_stock 테이블에 기록
                 updateWarehouseStock(product.getProductId(), warehouse.getCode(),
-                    warehouse.getName(), quantity);
+                        warehouse.getName(), quantity);
                 log.debug("신규 창고 입고 (warehouse_stock 테이블): {} {}", warehouse.getCode(), quantity);
         }
 
@@ -90,16 +90,16 @@ public class InventoryService {
 
         // 거래 내역 기록
         String detailedNotes = String.format("창고:%s(%s) | %s",
-            warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
+                warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
         InventoryTransaction transaction = InventoryTransaction.createInbound(
-            product, quantity, location != null ? location : warehouse.getName(), detailedNotes);
+                product, quantity, location != null ? location : warehouse.getName(), detailedNotes);
         transactionRepository.save(transaction);
 
         Product saved = productRepository.save(product);
 
         log.info("✅ 입고 완료: {} - 창고:{}, 재고 {} → {}",
-            product.getProductName(), warehouse.getName(),
-            transaction.getBeforeStock(), transaction.getAfterStock());
+                product.getProductName(), warehouse.getName(),
+                transaction.getBeforeStock(), transaction.getAfterStock());
 
         return saved;
     }
@@ -109,17 +109,17 @@ public class InventoryService {
      */
     @Transactional
     public Product processOutboundWithWarehouse(UUID productId, int quantity,
-                                                String warehouseCode, UUID orderId, String notes) {
+            String warehouseCode, UUID orderId, String notes) {
         log.info("📤 출고 처리 (창고별): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouseCode);
 
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
         // ✅ DB에서 창고 조회 (하드코딩 switch 완전 대체)
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
-            .filter(w -> Boolean.TRUE.equals(w.getIsActive()))
-            .orElseThrow(() -> new IllegalArgumentException(
-                "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
+                .filter(w -> Boolean.TRUE.equals(w.getIsActive()))
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
 
         // 레거시 컬럼 창고는 개별 컬럼 차감, 신규 창고는 product_warehouse_stock 테이블
         int warehouseStock;
@@ -146,13 +146,13 @@ public class InventoryService {
             default:
                 // 신규 창고: product_warehouse_stock 테이블에서 차감
                 ProductWarehouseStock ws = warehouseStockRepository
-                    .findByProductIdAndWarehouseCode(product.getProductId(), warehouse.getCode())
-                    .orElse(null);
+                        .findByProductIdAndWarehouseCode(product.getProductId(), warehouse.getCode())
+                        .orElse(null);
                 int wsStock = ws != null ? ws.getStock() : 0;
                 if (wsStock < quantity)
                     throw new IllegalStateException(warehouse.getName() + " 재고 부족 (현재: " + wsStock + "개)");
                 updateWarehouseStock(product.getProductId(), warehouse.getCode(),
-                    warehouse.getName(), -quantity);
+                        warehouse.getName(), -quantity);
                 log.debug("신규 창고 출고 (warehouse_stock 테이블): {} -{}", warehouse.getCode(), quantity);
         }
 
@@ -161,20 +161,20 @@ public class InventoryService {
 
         // 거래 내역 기록
         String detailedNotes = String.format("창고:%s(%s) | %s",
-            warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
+                warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
         InventoryTransaction transaction = InventoryTransaction.createOutbound(
-            product, quantity, orderId, detailedNotes);
+                product, quantity, orderId, detailedNotes);
         transactionRepository.save(transaction);
 
         Product saved = productRepository.save(product);
 
         log.info("✅ 출고 완료: {} - 창고:{}, 재고 {} → {}",
-            product.getProductName(), warehouse.getName(),
-            transaction.getBeforeStock(), transaction.getAfterStock());
+                product.getProductName(), warehouse.getName(),
+                transaction.getBeforeStock(), transaction.getAfterStock());
 
         if (saved.isBelowSafetyStock()) {
             log.warn("⚠️ 안전 재고 미달: {} (현재: {}, 안전: {})",
-                saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
+                    saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
         }
 
         return saved;
@@ -190,18 +190,18 @@ public class InventoryService {
         log.info("📦 입고 처리: 상품 ID={}, 수량={}", productId, quantity);
 
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
         product.increaseStock(quantity);
 
         InventoryTransaction transaction = InventoryTransaction.createInbound(
-            product, quantity, location, notes);
+                product, quantity, location, notes);
         transactionRepository.save(transaction);
 
         Product saved = productRepository.save(product);
 
         log.info("✅ 입고 완료: {} - 재고 {} → {}",
-            product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
+                product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
 
         return saved;
     }
@@ -214,22 +214,22 @@ public class InventoryService {
         log.info("📤 출고 처리: 상품 ID={}, 수량={}", productId, quantity);
 
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
         product.decreaseStock(quantity);
 
         InventoryTransaction transaction = InventoryTransaction.createOutbound(
-            product, quantity, orderId, notes);
+                product, quantity, orderId, notes);
         transactionRepository.save(transaction);
 
         Product saved = productRepository.save(product);
 
         log.info("✅ 출고 완료: {} - 재고 {} → {}",
-            product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
+                product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
 
         if (saved.isBelowSafetyStock()) {
             log.warn("⚠️ 안전 재고 미달: {} (현재: {}, 안전: {})",
-                saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
+                    saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
         }
 
         return saved;
@@ -243,18 +243,18 @@ public class InventoryService {
         log.info("🔧 재고 조정: 상품 ID={}, 수량={}", productId, quantity);
 
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
         product.increaseStock(quantity);
 
         InventoryTransaction transaction = InventoryTransaction.createAdjustment(
-            product, quantity, reason);
+                product, quantity, reason);
         transactionRepository.save(transaction);
 
         Product saved = productRepository.save(product);
 
         log.info("✅ 재고 조정 완료: {} - 재고 {} → {}",
-            product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
+                product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
 
         return saved;
     }
@@ -265,7 +265,7 @@ public class InventoryService {
     @Transactional
     public void reserveStock(UUID productId, int quantity) {
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
         product.reserveStock(quantity);
         productRepository.save(product);
         log.info("🔒 재고 예약: {} - {}개", product.getProductName(), quantity);
@@ -277,7 +277,7 @@ public class InventoryService {
     @Transactional
     public void releaseReservedStock(UUID productId, int quantity) {
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
         product.releaseReservedStock(quantity);
         productRepository.save(product);
         log.info("🔓 재고 예약 취소: {} - {}개", product.getProductName(), quantity);
@@ -306,9 +306,9 @@ public class InventoryService {
     public List<InventoryTransaction> getTransactionHistory(
             UUID productId, LocalDateTime startDate, LocalDateTime endDate) {
         Product product = productRepository.findById(productId)
-            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
         return transactionRepository.findByProductAndCreatedAtBetweenOrderByCreatedAtDesc(
-            product, startDate, endDate);
+                product, startDate, endDate);
     }
 
     /**
@@ -335,21 +335,21 @@ public class InventoryService {
      * 같은 트랜잭션 내에서 호출되므로 @Transactional 없음
      */
     private void updateWarehouseStock(UUID productId, String warehouseCode,
-                                      String warehouseName, int quantity) {
+            String warehouseName, int quantity) {
         ProductWarehouseStock ws = warehouseStockRepository
-            .findByProductIdAndWarehouseCode(productId, warehouseCode)
-            .orElseGet(() -> ProductWarehouseStock.builder()
-                .productId(productId)
-                .warehouseCode(warehouseCode)
-                .warehouseName(warehouseName)
-                .stock(0)
-                .build());
+                .findByProductIdAndWarehouseCode(productId, warehouseCode)
+                .orElseGet(() -> ProductWarehouseStock.builder()
+                        .productId(productId)
+                        .warehouseCode(warehouseCode)
+                        .warehouseName(warehouseName)
+                        .stock(0)
+                        .build());
 
         int before = ws.getStock();
         ws.setStock(before + quantity);
         warehouseStockRepository.save(ws);
         log.info("창고별 재고 업데이트: {} ({}) {} → {}",
-            warehouseName, warehouseCode, before, ws.getStock());
+                warehouseName, warehouseCode, before, ws.getStock());
     }
 
     /**
