@@ -10,7 +10,7 @@ RUN gradle dependencies --no-daemon
 
 # 소스 복사 및 빌드
 COPY src ./src
-RUN gradle clean build -x test --no-daemon --parallel
+RUN gradle clean build -x test --no-daemon --parallel --no-build-cache
 
 # Stage 2: Runtime
 FROM eclipse-temurin:17-jre-alpine
