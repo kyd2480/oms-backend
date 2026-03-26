@@ -332,10 +332,10 @@ public class InventoryService {
     /**
      * 신규 창고별 재고 업데이트 (ProductWarehouseStock 테이블)
      * quantity > 0 : 입고, quantity < 0 : 출고
+     * 같은 트랜잭션 내에서 호출되므로 @Transactional 없음
      */
-    @Transactional
-    public void updateWarehouseStock(UUID productId, String warehouseCode,
-                                     String warehouseName, int quantity) {
+    private void updateWarehouseStock(UUID productId, String warehouseCode,
+                                      String warehouseName, int quantity) {
         ProductWarehouseStock ws = warehouseStockRepository
             .findByProductIdAndWarehouseCode(productId, warehouseCode)
             .orElseGet(() -> ProductWarehouseStock.builder()
@@ -345,10 +345,11 @@ public class InventoryService {
                 .stock(0)
                 .build());
 
-        ws.setStock(ws.getStock() + quantity);
+        int before = ws.getStock();
+        ws.setStock(before + quantity);
         warehouseStockRepository.save(ws);
-        log.info("창고별 재고 업데이트: {} {} {}개 → {}개",
-            warehouseName, warehouseCode, quantity > 0 ? "+"+quantity : quantity, ws.getStock());
+        log.info("창고별 재고 업데이트: {} ({}) {} → {}",
+            warehouseName, warehouseCode, before, ws.getStock());
     }
 
     /**
