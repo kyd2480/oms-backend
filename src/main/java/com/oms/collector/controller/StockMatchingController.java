@@ -477,7 +477,17 @@ public class StockMatchingController {
     }
 
     /**
-     * 할당 완료 목록 조회 (CONFIRMED 상태)
+     * 미매칭 건수만 빠르게 반환 (대시보드용)
+     * GET /api/stock-matching/unmatched-count
+     */
+    @GetMapping("/unmatched-count")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Long> getUnmatchedCount() {
+        Long count = orderRepository.countPendingUnmatched();
+        return ResponseEntity.ok(count);
+    }
+
+
      * GET /api/stock-matching/allocated?warehouseCode=ANYANG
      */
     @GetMapping("/allocated")

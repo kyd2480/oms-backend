@@ -84,6 +84,20 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     // ────────────────────────────────────────────────────────────────────────
 
     /**
+     * PENDING 주문 중 코드 매칭 안 된 아이템 수 (대시보드 카운트용)
+     */
+    @Query(value = """
+        SELECT COUNT(*)
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.order_id
+        LEFT JOIN products p ON LOWER(p.sku)     = LOWER(oi.product_code)
+                             OR LOWER(p.barcode) = LOWER(oi.product_code)
+        WHERE o.order_status = 'PENDING'
+          AND p.product_id IS NULL
+        """, nativeQuery = true)
+    Long countPendingUnmatched();
+
+    /**
      * PENDING 주문 중 productCode로 SKU 매칭된 아이템 조회 (DB JOIN)
      */
     @Query(value = """
