@@ -72,9 +72,10 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT COUNT(o) FROM Order o WHERE DATE(o.orderedAt) = CURRENT_DATE")
     long countTodayOrders();
 
-    @Query("SELECT o.orderNo FROM Order o WHERE DATE(o.orderedAt) = :date " +
-           "ORDER BY o.orderNo DESC LIMIT 1")
-    Optional<String> findLastOrderNoByDate(@Param("date") java.time.LocalDate date);
+    @Query(value = "SELECT o.order_no FROM orders o " +
+                   "WHERE TO_CHAR(o.ordered_at, 'YYYYMMDD') = :dateStr " +
+                   "ORDER BY o.order_no DESC LIMIT 1", nativeQuery = true)
+    String findLastOrderNoByDate(@Param("dateStr") String dateStr);
 
     // ────────────────────────────────────────────────────────────────────────
     // 재고 매칭용 네이티브 쿼리
