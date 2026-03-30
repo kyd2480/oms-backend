@@ -53,6 +53,60 @@ public class StockMatchingController {
         public String address;
         public String orderedAt;
 
+        // Projection 기반 생성자 (코드 매칭 성공 - product 정보 포함)
+        public MatchItemDTO(com.oms.collector.repository.MatchedItemProjection row, int stock) {
+            this.orderNo        = row.getOrderNo();
+            this.channelName    = row.getChannelName() != null ? row.getChannelName() : "";
+            this.recipientName  = row.getRecipientName();
+            this.productName    = row.getProductName();
+            this.productCode    = row.getProductCode();
+            this.sku            = row.getSku();
+            this.ordered        = row.getQuantity() != null ? row.getQuantity() : 0;
+            this.warehouseStock = stock;
+            this.orderedAt      = row.getOrderedAt() != null ? row.getOrderedAt() : "";
+
+            if (row.getProductId() == null) {
+                this.allocatable = 0;
+                this.shipStatus  = "NOT_MATCHED";
+            } else if (stock <= 0) {
+                this.allocatable = 0;
+                this.shipStatus  = "IMPOSSIBLE";
+            } else if (stock >= this.ordered) {
+                this.allocatable = this.ordered;
+                this.shipStatus  = "FULL";
+            } else {
+                this.allocatable = stock;
+                this.shipStatus  = "PARTIAL";
+            }
+        }
+
+        // Projection 기반 생성자 (상품명 매칭 - product 별도 전달)
+        public MatchItemDTO(com.oms.collector.repository.MatchedItemProjection row, Product product, int stock) {
+            this.orderNo        = row.getOrderNo();
+            this.channelName    = row.getChannelName() != null ? row.getChannelName() : "";
+            this.recipientName  = row.getRecipientName();
+            this.productName    = row.getProductName();
+            this.productCode    = row.getProductCode();
+            this.sku            = product != null ? product.getSku() : null;
+            this.ordered        = row.getQuantity() != null ? row.getQuantity() : 0;
+            this.warehouseStock = stock;
+            this.orderedAt      = row.getOrderedAt() != null ? row.getOrderedAt() : "";
+
+            if (product == null) {
+                this.allocatable = 0;
+                this.shipStatus  = "NOT_MATCHED";
+            } else if (stock <= 0) {
+                this.allocatable = 0;
+                this.shipStatus  = "IMPOSSIBLE";
+            } else if (stock >= this.ordered) {
+                this.allocatable = this.ordered;
+                this.shipStatus  = "FULL";
+            } else {
+                this.allocatable = stock;
+                this.shipStatus  = "PARTIAL";
+            }
+        }
+
         public MatchItemDTO(Order o, OrderItem item, Product product, int stock) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
@@ -107,6 +161,10 @@ public class StockMatchingController {
     /**
      * 할당 창고 기준 재고 매칭
      * GET /api/stock-matching/match?warehouseCode=ANYANG&warehouseName=본사(안양)
+     *
+     * 개선: 9551건 Java 루프 → DB JOIN 쿼리 2번으로 교체
+     *   1) 코드 매칭 성공 아이템: SQL JOIN으로 한 번에 처리
+     *   2) 코드 매칭 실패 아이템: 상품명 Jaccard (소수만)
      */
     @GetMapping("/match")
     @Transactional(readOnly = true)
@@ -119,49 +177,48 @@ public class StockMatchingController {
         log.info("재고 매칭 시작: warehouse={}", warehouseCode);
         long t0 = System.currentTimeMillis();
 
-        // ── 주문 로딩 ─────────────────────────────────────────────
-        List<Order> orders = orderRepository.findByOrderStatusWithItems(Order.OrderStatus.PENDING);
-        log.info("[PERF] 주문 로딩 완료: {}건 → {}ms", orders.size(), System.currentTimeMillis() - t0);
-        long t1 = System.currentTimeMillis();
-
-        // ── 전체 상품 캐시 1회 로딩 ───────────────────────────────
-        List<Product> allProducts = productRepository.findAll();
-        Map<String, Product> skuMap     = new HashMap<>();
-        Map<String, Product> barcodeMap = new HashMap<>();
-        allProducts.forEach(prod -> {
-            if (prod.getSku()     != null && !prod.getSku().isBlank())
-                skuMap.put(prod.getSku().toLowerCase(), prod);
-            if (prod.getBarcode() != null && !prod.getBarcode().isBlank())
-                barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
-        });
-        log.info("[PERF] 상품 캐시 완료: {}건 → {}ms", allProducts.size(), System.currentTimeMillis() - t1);
-        long t2 = System.currentTimeMillis();
-
-        // ── 창고 재고 캐시 ────────────────────────────────────────
+        // ── 신규 창고 재고 캐시 (ANYANG/ICHEON/BUCHEON 외) ────────
         Map<UUID, Integer> warehouseStockCache = new HashMap<>();
         warehouseStockRepository.findByWarehouseCode(warehouseCode)
             .forEach(ws -> warehouseStockCache.put(ws.getProductId(), ws.getStock()));
-        log.info("[PERF] 창고재고 캐시 완료: {}ms", System.currentTimeMillis() - t2);
-        long t3 = System.currentTimeMillis();
 
-        // ── 매칭 루프 ─────────────────────────────────────────────
         List<MatchItemDTO> items = new ArrayList<>();
-        int nameMatchCount = 0;
-        for (Order o : orders) {
-            for (OrderItem item : o.getItems()) {
-                String code = item.getProductCode();
-                boolean codeMatched = code != null && !code.isBlank() && !isChannelProductCode(code)
-                    && (skuMap.containsKey(code.toLowerCase()) || barcodeMap.containsKey(code.toLowerCase()));
-                if (!codeMatched) nameMatchCount++;
 
-                Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
-                int stock = getWarehouseStockCached(product, warehouseCode, warehouseStockCache);
-                items.add(new MatchItemDTO(o, item, product, stock));
-            }
+        // ── 1단계: 코드 매칭 성공 → DB JOIN (Java 루프 없음) ──────
+        List<com.oms.collector.repository.MatchedItemProjection> matched =
+            orderRepository.findPendingMatchedByCode();
+        log.info("[PERF] DB JOIN 코드매칭: {}건 → {}ms", matched.size(), System.currentTimeMillis() - t0);
+
+        for (var row : matched) {
+            int stock = getStockFromProjection(row, warehouseCode, warehouseStockCache);
+            items.add(new MatchItemDTO(row, stock));
         }
-        log.info("[PERF] 매칭 루프 완료: 아이템{}건 (상품명매칭{}건) → {}ms",
-            items.size(), nameMatchCount, System.currentTimeMillis() - t3);
-        long t4 = System.currentTimeMillis();
+
+        // ── 2단계: 코드 매칭 실패 → 상품명 Jaccard (소수만) ───────
+        long t1 = System.currentTimeMillis();
+        List<com.oms.collector.repository.MatchedItemProjection> unmatched =
+            orderRepository.findPendingUnmatchedByCode();
+        log.info("[PERF] 미매칭 조회: {}건 → {}ms", unmatched.size(), System.currentTimeMillis() - t1);
+
+        if (!unmatched.isEmpty()) {
+            long t2 = System.currentTimeMillis();
+            List<Product> allProducts = productRepository.findAll();
+            Map<String, Product> skuMap     = new HashMap<>();
+            Map<String, Product> barcodeMap = new HashMap<>();
+            allProducts.forEach(prod -> {
+                if (prod.getSku()     != null) skuMap.put(prod.getSku().toLowerCase(), prod);
+                if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
+            });
+
+            for (var row : unmatched) {
+                Product product = findBestMatchByName(row.getProductName(), skuMap, barcodeMap, allProducts);
+                int stock = product != null
+                    ? getWarehouseStockCached(product, warehouseCode, warehouseStockCache)
+                    : 0;
+                items.add(new MatchItemDTO(row, product, stock));
+            }
+            log.info("[PERF] 상품명 매칭 완료: {}건 → {}ms", unmatched.size(), System.currentTimeMillis() - t2);
+        }
 
         // 정렬: FULL → PARTIAL → IMPOSSIBLE → NOT_MATCHED
         items.sort(Comparator.comparingInt(i -> switch (i.shipStatus) {
@@ -170,14 +227,8 @@ public class StockMatchingController {
             case "IMPOSSIBLE"  -> 2;
             default            -> 3;
         }));
-        log.info("[PERF] 정렬 완료: {}ms / 전체: {}ms", System.currentTimeMillis() - t4, System.currentTimeMillis() - t0);
 
-        log.info("매칭 완료: 완전:{}, 부분:{}, 불가:{}, 미매칭:{}",
-            items.stream().filter(i -> "FULL".equals(i.shipStatus)).count(),
-            items.stream().filter(i -> "PARTIAL".equals(i.shipStatus)).count(),
-            items.stream().filter(i -> "IMPOSSIBLE".equals(i.shipStatus)).count(),
-            items.stream().filter(i -> "NOT_MATCHED".equals(i.shipStatus)).count());
-
+        log.info("[PERF] 전체 완료: {}건 → {}ms", items.size(), System.currentTimeMillis() - t0);
         return ResponseEntity.ok(new MatchResultDTO(warehouseCode, warehouseName, items));
     }
 
@@ -252,7 +303,61 @@ public class StockMatchingController {
 
     // ─── 헬퍼 ────────────────────────────────────────────────────
 
-    // 쇼핑몰 상품코드 패턴 (11ST-PRD-xxx, NAVER-PRD-xxx, CP-PRD-xxx 등)
+    /**
+     * Projection에서 창고 코드에 맞는 재고 반환
+     */
+    private int getStockFromProjection(
+            com.oms.collector.repository.MatchedItemProjection row,
+            String warehouseCode,
+            Map<UUID, Integer> cache) {
+        return switch (warehouseCode.toUpperCase()) {
+            case "ANYANG"     -> row.getWarehouseStockAnyang()  != null ? row.getWarehouseStockAnyang()  : 0;
+            case "ICHEON_BOX",
+                 "ICHEON_PCS" -> row.getWarehouseStockIcheon()  != null ? row.getWarehouseStockIcheon()  : 0;
+            case "BUCHEON"    -> row.getWarehouseStockBucheon() != null ? row.getWarehouseStockBucheon() : 0;
+            default           -> row.getProductId() != null ? cache.getOrDefault(row.getProductId(), 0) : 0;
+        };
+    }
+
+    /**
+     * 상품명 기반 매칭 — 코드 매칭 실패한 소수 아이템용
+     */
+    private Product findBestMatchByName(String productName,
+                                        Map<String, Product> skuMap,
+                                        Map<String, Product> barcodeMap,
+                                        List<Product> allProducts) {
+        if (productName == null || productName.isBlank()) return null;
+
+        String firstToken = productName.split("[ /\\\\|·•\\-_]+")[0].toLowerCase();
+        if (firstToken.isBlank()) return null;
+
+        List<Product> candidates = new ArrayList<>();
+        for (Map.Entry<String, Product> e : skuMap.entrySet()) {
+            if (e.getKey().startsWith(firstToken)) candidates.add(e.getValue());
+        }
+        if (candidates.isEmpty()) {
+            for (Map.Entry<String, Product> e : barcodeMap.entrySet()) {
+                if (e.getKey().startsWith(firstToken)) candidates.add(e.getValue());
+            }
+        }
+        if (candidates.isEmpty()) {
+            for (Product p : allProducts) {
+                if (p.getProductName() != null &&
+                        p.getProductName().toLowerCase().contains(firstToken)) {
+                    candidates.add(p);
+                }
+            }
+        }
+        if (candidates.isEmpty()) return null;
+
+        final String pName = productName;
+        return candidates.stream()
+            .max(Comparator.comparingDouble(p -> jaccardSimilarity(pName, p.getProductName())))
+            .filter(p -> jaccardSimilarity(pName, p.getProductName()) >= 0.3)
+            .orElse(null);
+    }
+
+
     private boolean isChannelProductCode(String code) {
         if (code == null) return false;
         return code.matches("(?i)(11ST|NAVER|CP|GS|COUPANG|KAKAO)-.*");
@@ -384,35 +489,21 @@ public class StockMatchingController {
     ) {
         log.info("할당 완료 목록 조회: warehouse={}", warehouseCode);
 
-        // JOIN FETCH로 N+1 완전 제거
-        List<Order> orders = orderRepository.findByOrderStatusWithItems(Order.OrderStatus.CONFIRMED);
-
-        // 캐시 로딩
-        List<Product> allProducts = productRepository.findAll();
-        Map<String, Product> skuMap     = new HashMap<>();
-        Map<String, Product> barcodeMap = new HashMap<>();
-        allProducts.forEach(prod -> {
-            if (prod.getSku()     != null) skuMap.put(prod.getSku().toLowerCase(), prod);
-            if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
-        });
-
-        // 신규 창고 재고 캐시
         Map<UUID, Integer> warehouseStockCache = new HashMap<>();
         if (!warehouseCode.isBlank()) {
             warehouseStockRepository.findByWarehouseCode(warehouseCode)
                 .forEach(ws -> warehouseStockCache.put(ws.getProductId(), ws.getStock()));
         }
 
-        List<MatchItemDTO> items = new ArrayList<>();
-        for (Order o : orders) {
-            for (OrderItem item : o.getItems()) {
-                Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
-                int stock = warehouseCode.isBlank() ? 0 : getWarehouseStockCached(product, warehouseCode, warehouseStockCache);
-                MatchItemDTO dto = new MatchItemDTO(o, item, product, stock);
+        List<MatchItemDTO> items = orderRepository.findConfirmedWithProducts().stream()
+            .map(row -> {
+                int stock = warehouseCode.isBlank() ? 0
+                    : getStockFromProjection(row, warehouseCode, warehouseStockCache);
+                MatchItemDTO dto = new MatchItemDTO(row, stock);
                 dto.shipStatus = "ALLOCATED";
-                items.add(dto);
-            }
-        }
+                return dto;
+            })
+            .collect(Collectors.toList());
 
         return ResponseEntity.ok(items);
     }

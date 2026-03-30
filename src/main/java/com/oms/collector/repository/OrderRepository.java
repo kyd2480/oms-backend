@@ -1,48 +1,20 @@
 package com.oms.collector.repository;
 
 import com.oms.collector.entity.Order;
-import com.oms.collector.entity.SalesChannel;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * 주문 Repository
- */
-@Repository
 public interface OrderRepository extends JpaRepository<Order, UUID> {
-    
-    /**
-     * 주문번호로 조회
-     */
-    Optional<Order> findByOrderNo(String orderNo);
-    
-    /**
-     * 판매처 주문번호로 조회
-     */
-    Optional<Order> findByChannelAndChannelOrderNo(SalesChannel channel, String channelOrderNo);
-    
-    /**
-     * 판매처별 주문 조회
-     */
-    List<Order> findByChannelOrderByOrderedAtDesc(SalesChannel channel);
-    
-    /**
-     * 상태별 주문 조회
-     */
-    List<Order> findByOrderStatusOrderByOrderedAtDesc(Order.OrderStatus status);
 
-    /**
-     * 상태별 주문 조회 (페이지네이션)
-     */
+    Optional<Order> findByOrderNo(String orderNo);
+
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
 
     /**
@@ -51,124 +23,99 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
            "WHERE o.orderStatus = :status ORDER BY o.orderedAt DESC")
     List<Order> findByOrderStatusWithItems(@Param("status") Order.OrderStatus status);
-    
-    /**
-     * 기간별 주문 조회 (items JOIN FETCH — N+1 방지)
-     */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.orderedAt DESC")
-    List<Order> findByDateRange(@Param("startDate") LocalDateTime startDate,
-                                @Param("endDate") LocalDateTime endDate);
-    
-    /**
-     * 판매처 + 기간별 주문 조회
-     */
-    @Query("SELECT o FROM Order o WHERE o.channel = :channel " +
-           "AND o.orderedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.orderedAt DESC")
-    List<Order> findByChannelAndDateRange(
-        @Param("channel") SalesChannel channel,
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate") LocalDateTime endDate
-    );
-    
-    /**
-     * 고객 전화번호로 주문 조회
-     */
-    List<Order> findByCustomerPhoneOrderByOrderedAtDesc(String customerPhone);
-    
-    /**
-     * 오늘 주문 수 조회
-     */
-    @Query("SELECT COUNT(o) FROM Order o WHERE CAST(o.orderedAt AS LocalDate) = CURRENT_DATE")
-    long countTodayOrders();
-    
-    /**
-     * 판매처별 오늘 주문 수
-     */
-    @Query("SELECT COUNT(o) FROM Order o WHERE o.channel = :channel " +
-           "AND CAST(o.orderedAt AS LocalDate) = CURRENT_DATE")
-    long countTodayOrdersByChannel(@Param("channel") SalesChannel channel);
-    
-    /**
-     * 최근 N일 주문 통계
-     */
-    @Query("SELECT CAST(o.orderedAt AS LocalDate) as date, COUNT(o) as count " +
-           "FROM Order o WHERE o.orderedAt >= :since " +
-           "GROUP BY CAST(o.orderedAt AS LocalDate) ORDER BY CAST(o.orderedAt AS LocalDate) DESC")
-    List<Object[]> getOrderStatisticsSince(@Param("since") LocalDateTime since);
-    
-    /**
-     * 상태 + 주문일자 기간 조회 (InvoiceController 사용)
-     */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.orderStatus = :status " +
-           "AND o.orderedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.orderedAt DESC")
-    List<Order> findByOrderStatusAndDateRange(
-        @Param("status")    Order.OrderStatus status,
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate")   LocalDateTime endDate
-    );
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 재고 매칭용 네이티브 쿼리
+    // orders + order_items + products 를 DB에서 직접 JOIN
+    // Java 루프 없이 매칭 결과를 한 번에 가져와 9551건 루프 문제 해결
+    // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * 상태 + updatedAt 기간 조회 (InvoiceController - 발송 완료 조회 사용)
+     * PENDING 주문 중 productCode로 SKU 매칭된 아이템 조회 (DB JOIN)
      */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.orderStatus = :status " +
-           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.updatedAt DESC")
-    List<Order> findByOrderStatusAndUpdatedAtRange(
-        @Param("status")    Order.OrderStatus status,
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate")   LocalDateTime endDate
-    );
+    @Query(value = """
+        SELECT
+            o.order_no          AS orderNo,
+            COALESCE(sc.channel_name, '') AS channelName,
+            o.recipient_name    AS recipientName,
+            o.address           AS address,
+            CAST(o.ordered_at AS VARCHAR) AS orderedAt,
+            oi.product_name     AS productName,
+            oi.product_code     AS productCode,
+            oi.quantity         AS quantity,
+            p.product_id        AS productId,
+            p.sku               AS sku,
+            COALESCE(p.warehouse_stock_anyang,  0) AS warehouseStockAnyang,
+            COALESCE(p.warehouse_stock_icheon,  0) AS warehouseStockIcheon,
+            COALESCE(p.warehouse_stock_bucheon, 0) AS warehouseStockBucheon
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.order_id
+        JOIN products p     ON LOWER(p.sku) = LOWER(oi.product_code)
+                            OR LOWER(p.barcode) = LOWER(oi.product_code)
+        LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
+        WHERE o.order_status = 'PENDING'
+          AND oi.product_code IS NOT NULL
+          AND oi.product_code <> ''
+          AND oi.product_code !~* '^(11ST|NAVER|CP|GS|COUPANG|KAKAO)-'
+        ORDER BY o.ordered_at DESC
+        """, nativeQuery = true)
+    List<MatchedItemProjection> findPendingMatchedByCode();
 
     /**
-     * 취소 주문 기간 조회 (updatedAt 기준 — 취소 처리 시점)
+     * PENDING 주문 중 productCode로 매칭 안 된 아이템만 조회 (상품명 매칭 대상)
+     * LEFT JOIN 후 product_id IS NULL인 것만 반환
      */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.orderStatus = 'CANCELLED' " +
-           "AND o.updatedAt BETWEEN :startDate AND :endDate " +
-           "ORDER BY o.updatedAt DESC")
-    List<Order> findCancelledByDateRange(
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate")   LocalDateTime endDate
-    );
+    @Query(value = """
+        SELECT
+            o.order_no          AS orderNo,
+            COALESCE(sc.channel_name, '') AS channelName,
+            o.recipient_name    AS recipientName,
+            o.address           AS address,
+            CAST(o.ordered_at AS VARCHAR) AS orderedAt,
+            oi.product_name     AS productName,
+            oi.product_code     AS productCode,
+            oi.quantity         AS quantity,
+            NULL::uuid          AS productId,
+            NULL                AS sku,
+            0                   AS warehouseStockAnyang,
+            0                   AS warehouseStockIcheon,
+            0                   AS warehouseStockBucheon
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.order_id
+        LEFT JOIN products p ON LOWER(p.sku)     = LOWER(oi.product_code)
+                             OR LOWER(p.barcode) = LOWER(oi.product_code)
+        LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
+        WHERE o.order_status = 'PENDING'
+          AND p.product_id IS NULL
+        ORDER BY o.ordered_at DESC
+        """, nativeQuery = true)
+    List<MatchedItemProjection> findPendingUnmatchedByCode();
 
     /**
-     * CS 검색 — 발송일자(updatedAt) 기준 기간 조회
+     * CONFIRMED 주문 아이템 조회 (allocated API용)
      */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
-           "AND o.orderStatus = 'SHIPPED' " +
-           "ORDER BY o.updatedAt DESC")
-    List<Order> findShippedByDateRange(
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate")   LocalDateTime endDate
-    );
-
-    /**
-     * CS 검색 — 기간 + deliveryMemo의 송장번호 포함 검색 (주문일자 기준)
-     */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
-           "WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
-           "AND o.deliveryMemo LIKE %:tracking% " +
-           "ORDER BY o.orderedAt DESC")
-    List<Order> findByDateRangeAndTracking(
-        @Param("startDate") LocalDateTime startDate,
-        @Param("endDate")   LocalDateTime endDate,
-        @Param("tracking")  String tracking
-    );
-
-    /**
-     * 특정 날짜의 마지막 주문번호 조회 (시퀀스 생성용)
-     * 
-     * @param dateString YYYYMMDD 형식의 날짜 (예: "20260209")
-     * @return 마지막 주문번호 (예: "OMS-20260209-0005")
-     */
-    @Query("SELECT o.orderNo FROM Order o WHERE o.orderNo LIKE CONCAT('OMS-', :dateString, '-%') " +
-           "ORDER BY o.orderNo DESC LIMIT 1")
-    String findLastOrderNoByDate(@Param("dateString") String dateString);
+    @Query(value = """
+        SELECT
+            o.order_no          AS orderNo,
+            COALESCE(sc.channel_name, '') AS channelName,
+            o.recipient_name    AS recipientName,
+            o.address           AS address,
+            CAST(o.ordered_at AS VARCHAR) AS orderedAt,
+            oi.product_name     AS productName,
+            oi.product_code     AS productCode,
+            oi.quantity         AS quantity,
+            p.product_id        AS productId,
+            p.sku               AS sku,
+            COALESCE(p.warehouse_stock_anyang,  0) AS warehouseStockAnyang,
+            COALESCE(p.warehouse_stock_icheon,  0) AS warehouseStockIcheon,
+            COALESCE(p.warehouse_stock_bucheon, 0) AS warehouseStockBucheon
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.order_id
+        LEFT JOIN products p ON LOWER(p.sku)     = LOWER(oi.product_code)
+                             OR LOWER(p.barcode) = LOWER(oi.product_code)
+        LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
+        WHERE o.order_status = 'CONFIRMED'
+        ORDER BY o.ordered_at DESC
+        """, nativeQuery = true)
+    List<MatchedItemProjection> findConfirmedWithProducts();
 }
