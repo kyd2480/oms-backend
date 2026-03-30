@@ -69,7 +69,7 @@ logging:
 # 주문 수집 설정
 collector:
   schedule:
-    enabled: true  # 스케줄러 켜기
+    enabled: false  # 스케줄러 켜기
     interval: 120000  # 2분 (테스트용, 원래는 600000=10분)
     initial-delay: 30000  # 30초 후 시작
     daily-cron: "0 0 0 * * *"  # 매일 자정
