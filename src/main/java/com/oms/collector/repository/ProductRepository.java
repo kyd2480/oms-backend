@@ -36,9 +36,9 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     List<Product> findByIsActiveTrueOrderByProductNameAsc();
     
     /**
-     * 안전 재고 미달 상품 조회
+     * 재고 없는 상품 조회 (안전재고 제거 → out-of-stock과 동일)
      */
-    @Query("SELECT p FROM Product p WHERE p.availableStock <= p.safetyStock AND p.isActive = true")
+    @Query("SELECT p FROM Product p WHERE p.availableStock = 0 AND p.isActive = true")
     List<Product> findLowStockProducts();
     
     /**
