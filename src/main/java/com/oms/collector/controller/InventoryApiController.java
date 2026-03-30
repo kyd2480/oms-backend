@@ -241,13 +241,12 @@ public class InventoryApiController {
         List<Product> all = productRepository.findAll();
         long total      = all.size();
         long outOfStock = all.stream().filter(p -> p.getAvailableStock() != null && p.getAvailableStock() <= 0).count();
-        long lowStock   = all.stream().filter(p -> p.isBelowSafetyStock()).count();
         int  totalQty   = all.stream().mapToInt(p -> p.getTotalStock() != null ? p.getTotalStock() : 0).sum();
 
         return ResponseEntity.ok(Map.of(
             "totalProducts",  total,
             "outOfStock",     outOfStock,
-            "lowStock",       lowStock,
+            "lowStock",       0,
             "totalQuantity",  totalQty
         ));
     }
