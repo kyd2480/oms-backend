@@ -69,7 +69,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         @Param("start")  java.time.LocalDateTime start,
         @Param("end")    java.time.LocalDateTime end);
 
-    @Query("SELECT COUNT(o) FROM Order o WHERE DATE(o.orderedAt) = CURRENT_DATE")
+    @Query(value = "SELECT COUNT(*) FROM orders WHERE ordered_at::date = CURRENT_DATE", nativeQuery = true)
     long countTodayOrders();
 
     @Query(value = "SELECT o.order_no FROM orders o " +
