@@ -488,6 +488,8 @@ public class StockMatchingController {
     }
 
 
+    /**
+     * 할당 완료 목록 조회 (CONFIRMED 상태)
      * GET /api/stock-matching/allocated?warehouseCode=ANYANG
      */
     @GetMapping("/allocated")
