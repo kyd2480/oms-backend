@@ -44,6 +44,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
      * 상태별 주문 조회 (페이지네이션)
      */
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
+
+    /**
+     * 상태별 전체 주문 조회 — items JOIN FETCH (N+1 방지)
+     */
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderStatus = :status ORDER BY o.orderedAt DESC")
+    List<Order> findByOrderStatusWithItems(@Param("status") Order.OrderStatus status);
     
     /**
      * 기간별 주문 조회 (items JOIN FETCH — N+1 방지)

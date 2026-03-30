@@ -117,19 +117,8 @@ public class StockMatchingController {
     ) {
         log.info("재고 매칭: warehouse={}", warehouseCode);
 
-        // ── 주문 로딩 ─────────────────────────────────────────────
-        List<Order> orders = new ArrayList<>();
-        int p = 0;
-        while (true) {
-            var pageable = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-            var slice = orderRepository.findByOrderStatus(Order.OrderStatus.PENDING, pageable);
-            orders.addAll(slice.getContent());
-            if (!slice.hasNext()) break;
-        }
-        orders.forEach(o -> {
-            o.getItems().size();
-            if (o.getChannel() != null) o.getChannel().getChannelName();
-        });
+        // ── 주문 로딩 (JOIN FETCH로 N+1 완전 제거) ───────────────
+        List<Order> orders = orderRepository.findByOrderStatusWithItems(Order.OrderStatus.PENDING);
 
         // ── 전체 상품 캐시 1회 로딩 (N+1 방지) ───────────────────
         List<Product> allProducts = productRepository.findAll();
@@ -141,13 +130,18 @@ public class StockMatchingController {
             if (prod.getBarcode() != null && !prod.getBarcode().isBlank())
                 barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
         });
+
+        // ── 신규 창고 재고 전체 캐시 (warehouseCode별 productId → stock) ──
+        Map<UUID, Integer> warehouseStockCache = new HashMap<>();
+        warehouseStockRepository.findByWarehouseCode(warehouseCode)
+            .forEach(ws -> warehouseStockCache.put(ws.getProductId(), ws.getStock()));
         // ─────────────────────────────────────────────────────────
 
         List<MatchItemDTO> items = new ArrayList<>();
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
                 Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
-                int stock = getWarehouseStock(product, warehouseCode);
+                int stock = getWarehouseStockCached(product, warehouseCode, warehouseStockCache);
                 items.add(new MatchItemDTO(o, item, product, stock));
             }
         }
@@ -307,10 +301,29 @@ public class StockMatchingController {
     private int getWarehouseStock(Product product, String warehouseCode) {
         if (product == null) return 0;
         return switch (warehouseCode.toUpperCase()) {
-            case "ANYANG"  -> product.getWarehouseStockAnyang();
-            case "ICHEON"  -> product.getWarehouseStockIcheon();
-            case "BUCHEON" -> product.getWarehouseStockBucheon();
-            default        -> product.getAvailableStock();
+            case "ANYANG"     -> product.getWarehouseStockAnyang();
+            case "ICHEON_BOX",
+                 "ICHEON_PCS" -> product.getWarehouseStockIcheon();
+            case "BUCHEON"    -> product.getWarehouseStockBucheon();
+            default           -> {
+                yield warehouseStockRepository
+                    .findByProductIdAndWarehouseCode(product.getProductId(), warehouseCode)
+                    .map(com.oms.collector.entity.ProductWarehouseStock::getStock)
+                    .orElse(0);
+            }
+        };
+    }
+
+    // 캐시 기반 창고 재고 조회 (N+1 완전 제거)
+    private int getWarehouseStockCached(Product product, String warehouseCode,
+                                        Map<UUID, Integer> cache) {
+        if (product == null) return 0;
+        return switch (warehouseCode.toUpperCase()) {
+            case "ANYANG"     -> product.getWarehouseStockAnyang()  != null ? product.getWarehouseStockAnyang()  : 0;
+            case "ICHEON_BOX",
+                 "ICHEON_PCS" -> product.getWarehouseStockIcheon()  != null ? product.getWarehouseStockIcheon()  : 0;
+            case "BUCHEON"    -> product.getWarehouseStockBucheon() != null ? product.getWarehouseStockBucheon() : 0;
+            default           -> cache.getOrDefault(product.getProductId(), 0);
         };
     }
 
@@ -327,18 +340,8 @@ public class StockMatchingController {
     ) {
         log.info("할당 완료 목록 조회: warehouse={}", warehouseCode);
 
-        List<Order> orders = new ArrayList<>();
-        int p2 = 0;
-        while (true) {
-            var pageable = PageRequest.of(p2++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-            var slice = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pageable);
-            orders.addAll(slice.getContent());
-            if (!slice.hasNext()) break;
-        }
-        orders.forEach(o -> {
-            o.getItems().size();
-            if (o.getChannel() != null) o.getChannel().getChannelName();
-        });
+        // JOIN FETCH로 N+1 완전 제거
+        List<Order> orders = orderRepository.findByOrderStatusWithItems(Order.OrderStatus.CONFIRMED);
 
         // 캐시 로딩
         List<Product> allProducts = productRepository.findAll();
@@ -349,11 +352,18 @@ public class StockMatchingController {
             if (prod.getBarcode() != null) barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
         });
 
+        // 신규 창고 재고 캐시
+        Map<UUID, Integer> warehouseStockCache = new HashMap<>();
+        if (!warehouseCode.isBlank()) {
+            warehouseStockRepository.findByWarehouseCode(warehouseCode)
+                .forEach(ws -> warehouseStockCache.put(ws.getProductId(), ws.getStock()));
+        }
+
         List<MatchItemDTO> items = new ArrayList<>();
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
                 Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
-                int stock = warehouseCode.isBlank() ? 0 : getWarehouseStock(product, warehouseCode);
+                int stock = warehouseCode.isBlank() ? 0 : getWarehouseStockCached(product, warehouseCode, warehouseStockCache);
                 MatchItemDTO dto = new MatchItemDTO(o, item, product, stock);
                 dto.shipStatus = "ALLOCATED";
                 items.add(dto);
