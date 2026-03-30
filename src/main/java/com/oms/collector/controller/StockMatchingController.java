@@ -256,26 +256,52 @@ public class StockMatchingController {
                           : barcodeMap.get(lower);
             if (exact != null) return exact;
         }
-        // SKU/바코드 매칭 실패 시 상품명 유사도
-        return findBestMatchByNameFromCache(item.getProductName(), allProducts);
+        // SKU/바코드 매칭 실패 시 상품명 인덱스 기반 조회
+        return findBestMatchByNameFromCache(item.getProductName(), skuMap, barcodeMap, allProducts);
     }
 
-    private Product findBestMatchByNameFromCache(String productName, List<Product> allProducts) {
+    /**
+     * 상품명 기반 매칭 — 전체 스캔 제거
+     *
+     * 기존: 후보 없으면 allProducts 전체 Jaccard → O(N*아이템수) → 1.5분 원인
+     * 개선: 첫 토큰으로 SKU/바코드맵에서 prefix 매칭 → O(후보수) ≈ O(수십)
+     *       후보가 없으면 null 반환 (전체 스캔 금지)
+     */
+    private Product findBestMatchByNameFromCache(String productName,
+                                                  Map<String, Product> skuMap,
+                                                  Map<String, Product> barcodeMap,
+                                                  List<Product> allProducts) {
         if (productName == null || productName.isBlank()) return null;
         if (allProducts.isEmpty()) return null;
 
+        // 첫 토큰 추출 (보통 SKU 앞부분 코드)
+        String firstToken = productName.split("[ /\\\\|·•\\-_]+")[0].toLowerCase();
+        if (firstToken.isBlank()) return null;
+
+        // 1단계: SKU prefix 매칭
+        List<Product> candidates = new ArrayList<>();
+        for (Map.Entry<String, Product> e : skuMap.entrySet()) {
+            if (e.getKey().startsWith(firstToken)) candidates.add(e.getValue());
+        }
+        // 2단계: 바코드 prefix 매칭
+        if (candidates.isEmpty()) {
+            for (Map.Entry<String, Product> e : barcodeMap.entrySet()) {
+                if (e.getKey().startsWith(firstToken)) candidates.add(e.getValue());
+            }
+        }
+        // 3단계: 상품명 contains — 여전히 후보 없을 때만 (전체 스캔이지만 발생 빈도 낮음)
+        if (candidates.isEmpty()) {
+            for (Product p : allProducts) {
+                if (p.getProductName() != null &&
+                        p.getProductName().toLowerCase().contains(firstToken)) {
+                    candidates.add(p);
+                }
+            }
+        }
+        // 그래도 없으면 매칭 불가 반환 (allProducts 전체 Jaccard 스캔 금지)
+        if (candidates.isEmpty()) return null;
+
         final String pName = productName;
-        String code = productName.split(" ")[0].toLowerCase();
-
-        // 코드 앞부분으로 1차 필터
-        List<Product> candidates = allProducts.stream()
-            .filter(p -> p.getProductName() != null &&
-                (p.getProductName().toLowerCase().contains(code) ||
-                 (p.getSku() != null && p.getSku().toLowerCase().contains(code))))
-            .collect(Collectors.toList());
-
-        if (candidates.isEmpty()) candidates = allProducts;
-
         return candidates.stream()
             .max(Comparator.comparingDouble(p -> jaccardSimilarity(pName, p.getProductName())))
             .filter(p -> jaccardSimilarity(pName, p.getProductName()) >= 0.3)
