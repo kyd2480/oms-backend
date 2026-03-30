@@ -33,8 +33,8 @@ public class OrderProcessingService {
     
     /**
      * 미처리 주문 일괄 처리
+     * 각 건을 독립 트랜잭션으로 처리 — 1건 실패해도 나머지 계속 진행
      */
-    @Transactional
     public int processUnprocessedOrders() {
         log.info("========================================");
         log.info("🔄 미처리 주문 처리 시작");
@@ -48,12 +48,16 @@ public class OrderProcessingService {
         
         for (RawOrder rawOrder : unprocessedOrders) {
             try {
-                processRawOrder(rawOrder);
+                processRawOrder(rawOrder);  // 각 건 독립 @Transactional
                 successCount++;
             } catch (Exception e) {
                 errorCount++;
                 log.error("❌ 주문 처리 실패: {}", rawOrder.getChannelOrderNo(), e);
-                rawOrderService.markAsError(rawOrder, e.getMessage());
+                try {
+                    rawOrderService.markAsError(rawOrder, e.getMessage());
+                } catch (Exception ex) {
+                    log.error("❌ 에러 표시 실패: {}", rawOrder.getChannelOrderNo(), ex);
+                }
             }
         }
         
@@ -83,10 +87,20 @@ public class OrderProcessingService {
             SalesChannel channel = rawOrder.getChannel();
             Order order = orderNormalizer.normalize(collectedOrder, rawOrder, channel);
             
-            // 3. 저장
+            // 3. 중복 체크 — 이미 존재하면 처리완료 표시 후 기존 주문 반환
+            if (order.getOrderNo() != null) {
+                Order existing = orderRepository.findByOrderNo(order.getOrderNo()).orElse(null);
+                if (existing != null) {
+                    log.debug("⏭️ 중복 주문 skip: {}", order.getOrderNo());
+                    rawOrderService.markAsProcessed(rawOrder);
+                    return existing;
+                }
+            }
+
+            // 4. 저장
             Order savedOrder = orderRepository.save(order);
             
-            // 4. 원본 주문 처리 완료 표시
+            // 5. 원본 주문 처리 완료 표시
             rawOrderService.markAsProcessed(rawOrder);
             
             log.info("✅ 주문 처리 완료: {} → {}", 
