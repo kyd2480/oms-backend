@@ -72,6 +72,10 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT COUNT(o) FROM Order o WHERE DATE(o.orderedAt) = CURRENT_DATE")
     long countTodayOrders();
 
+    @Query("SELECT o.orderNo FROM Order o WHERE DATE(o.orderedAt) = DATE(:date) " +
+           "ORDER BY o.orderNo DESC LIMIT 1")
+    Optional<String> findLastOrderNoByDate(@Param("date") java.time.LocalDateTime date);
+
     // ────────────────────────────────────────────────────────────────────────
     // 재고 매칭용 네이티브 쿼리
     // orders + order_items + products 를 DB에서 직접 JOIN
