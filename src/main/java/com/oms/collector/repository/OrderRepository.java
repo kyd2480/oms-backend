@@ -24,6 +24,38 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
            "WHERE o.orderStatus = :status ORDER BY o.orderedAt DESC")
     List<Order> findByOrderStatusWithItems(@Param("status") Order.OrderStatus status);
 
+    // ── CS / 취소 / 배송 조회용 ────────────────────────────────────────────
+
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
+    List<Order> findByOrderStatusAndDateRange(
+        @Param("status") Order.OrderStatus status,
+        @Param("start")  java.time.LocalDateTime start,
+        @Param("end")    java.time.LocalDateTime end);
+
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = 'SHIPPED' " +
+           "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
+    List<Order> findShippedByDateRange(
+        @Param("start") java.time.LocalDateTime start,
+        @Param("end")   java.time.LocalDateTime end);
+
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = 'CANCELLED' " +
+           "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
+    List<Order> findCancelledByDateRange(
+        @Param("start") java.time.LocalDateTime start,
+        @Param("end")   java.time.LocalDateTime end);
+
+    @Query("SELECT o FROM Order o WHERE o.orderedAt BETWEEN :start AND :end " +
+           "AND (:keyword IS NULL OR :keyword = '' " +
+           "     OR o.orderNo LIKE %:keyword% " +
+           "     OR o.recipientName LIKE %:keyword% " +
+           "     OR o.customerName LIKE %:keyword%) " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> findByDateRangeAndTracking(
+        @Param("start")   java.time.LocalDateTime start,
+        @Param("end")     java.time.LocalDateTime end,
+        @Param("keyword") String keyword);
+
     // ────────────────────────────────────────────────────────────────────────
     // 재고 매칭용 네이티브 쿼리
     // orders + order_items + products 를 DB에서 직접 JOIN
