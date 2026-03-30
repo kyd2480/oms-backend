@@ -116,6 +116,7 @@ public class Order {
     
     // 주문 상품 (One-to-Many)
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    @org.hibernate.annotations.BatchSize(size = 50)
     @Builder.Default
     private List<OrderItem> items = new ArrayList<>();
     

@@ -46,9 +46,10 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
     
     /**
-     * 기간별 주문 조회
+     * 기간별 주문 조회 (items JOIN FETCH — N+1 방지)
      */
-    @Query("SELECT o FROM Order o WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
            "ORDER BY o.orderedAt DESC")
     List<Order> findByDateRange(@Param("startDate") LocalDateTime startDate,
                                 @Param("endDate") LocalDateTime endDate);
@@ -94,7 +95,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * 상태 + 주문일자 기간 조회 (InvoiceController 사용)
      */
-    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderStatus = :status " +
            "AND o.orderedAt BETWEEN :startDate AND :endDate " +
            "ORDER BY o.orderedAt DESC")
     List<Order> findByOrderStatusAndDateRange(
@@ -106,7 +108,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * 상태 + updatedAt 기간 조회 (InvoiceController - 발송 완료 조회 사용)
      */
-    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderStatus = :status " +
            "AND o.updatedAt BETWEEN :startDate AND :endDate " +
            "ORDER BY o.updatedAt DESC")
     List<Order> findByOrderStatusAndUpdatedAtRange(
@@ -118,7 +121,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * 취소 주문 기간 조회 (updatedAt 기준 — 취소 처리 시점)
      */
-    @Query("SELECT o FROM Order o WHERE o.orderStatus = 'CANCELLED' " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderStatus = 'CANCELLED' " +
            "AND o.updatedAt BETWEEN :startDate AND :endDate " +
            "ORDER BY o.updatedAt DESC")
     List<Order> findCancelledByDateRange(
@@ -129,7 +133,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * CS 검색 — 발송일자(updatedAt) 기준 기간 조회
      */
-    @Query("SELECT o FROM Order o WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.updatedAt BETWEEN :startDate AND :endDate " +
            "AND o.orderStatus = 'SHIPPED' " +
            "ORDER BY o.updatedAt DESC")
     List<Order> findShippedByDateRange(
@@ -140,7 +145,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * CS 검색 — 기간 + deliveryMemo의 송장번호 포함 검색 (주문일자 기준)
      */
-    @Query("SELECT o FROM Order o WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+           "WHERE o.orderedAt BETWEEN :startDate AND :endDate " +
            "AND o.deliveryMemo LIKE %:tracking% " +
            "ORDER BY o.orderedAt DESC")
     List<Order> findByDateRangeAndTracking(
