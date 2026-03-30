@@ -35,6 +35,7 @@ public class StockMatchingController {
     private final OrderRepository   orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService  inventoryService;
+    private final com.oms.collector.repository.ProductWarehouseStockRepository warehouseStockRepository;
 
     // ─── DTO ─────────────────────────────────────────────────────
 
