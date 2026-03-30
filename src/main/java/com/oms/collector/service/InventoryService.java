@@ -274,14 +274,6 @@ public class InventoryService {
     }
 
     /**
-     * 안전 재고 미달 상품 조회
-     */
-    @Transactional(readOnly = true)
-    public List<Product> getLowStockProducts() {
-        return productRepository.findLowStockProducts();
-    }
-
-    /**
      * 재고 없는 상품 조회
      */
     @Transactional(readOnly = true)

@@ -16,36 +16,22 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * 재고 관리 API Controller
- */
 @Slf4j
 @RestController
 @RequestMapping("/api/inventory")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*", maxAge = 3600)
 public class InventoryController {
-    
+
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
-    
-    /**
-     * 전체 상품 목록 조회
-     */
+
     @GetMapping("/products")
     public ResponseEntity<List<ProductDto>> getAllProducts() {
         List<Product> products = productRepository.findByIsActiveTrueOrderByProductNameAsc();
-        
-        List<ProductDto> dtos = products.stream()
-            .map(this::toProductDto)
-            .collect(Collectors.toList());
-        
-        return ResponseEntity.ok(dtos);
+        return ResponseEntity.ok(products.stream().map(this::toProductDto).collect(Collectors.toList()));
     }
-    
-    /**
-     * 상품 상세 조회
-     */
+
     @GetMapping("/products/{id}")
     public ResponseEntity<ProductDto> getProduct(@PathVariable UUID id) {
         return productRepository.findById(id)
@@ -53,37 +39,21 @@ public class InventoryController {
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
     }
-    
-    /**
-     * 상품 검색 (통합: 상품명, SKU, 바코드)
-     */
+
     @GetMapping("/products/search")
     public ResponseEntity<List<ProductDto>> searchProducts(@RequestParam String keyword) {
         log.info("🔍 상품 검색: {}", keyword);
-        
         List<Product> products = productRepository.searchProducts(keyword);
-        
         log.info("✅ 검색 결과: {}개", products.size());
-        
-        List<ProductDto> dtos = products.stream()
-            .map(this::toProductDto)
-            .collect(Collectors.toList());
-        
-        return ResponseEntity.ok(dtos);
+        return ResponseEntity.ok(products.stream().map(this::toProductDto).collect(Collectors.toList()));
     }
-    
-    /**
-     * 상품 등록
-     */
+
     @PostMapping("/products")
     public ResponseEntity<ProductDto> createProduct(@RequestBody ProductDto dto) {
         log.info("🆕 상품 등록: {}", dto.getProductName());
-        
-        // SKU 중복 체크
         if (productRepository.existsBySku(dto.getSku())) {
             return ResponseEntity.badRequest().build();
         }
-        
         Product product = Product.builder()
             .sku(dto.getSku())
             .productName(dto.getProductName())
@@ -94,31 +64,20 @@ public class InventoryController {
             .totalStock(0)
             .availableStock(0)
             .reservedStock(0)
-            .safetyStock(dto.getSafetyStock() != null ? dto.getSafetyStock() : 10)
             .warehouseLocation(dto.getWarehouseLocation())
             .isActive(true)
             .description(dto.getDescription())
             .createdAt(LocalDateTime.now())
             .updatedAt(LocalDateTime.now())
             .build();
-        
         Product saved = productRepository.save(product);
-        
         log.info("✅ 상품 등록 완료: {} (SKU: {})", saved.getProductName(), saved.getSku());
-        
         return ResponseEntity.ok(toProductDto(saved));
     }
-    
-    /**
-     * 상품 수정
-     */
+
     @PutMapping("/products/{id}")
-    public ResponseEntity<ProductDto> updateProduct(
-            @PathVariable UUID id,
-            @RequestBody ProductDto dto) {
-        
+    public ResponseEntity<ProductDto> updateProduct(@PathVariable UUID id, @RequestBody ProductDto dto) {
         log.info("✏️ 상품 수정: {}", id);
-        
         return productRepository.findById(id)
             .map(product -> {
                 product.setProductName(dto.getProductName());
@@ -126,24 +85,17 @@ public class InventoryController {
                 product.setCategory(dto.getCategory());
                 product.setCostPrice(dto.getCostPrice());
                 product.setSellingPrice(dto.getSellingPrice());
-                product.setSafetyStock(dto.getSafetyStock());
                 product.setWarehouseLocation(dto.getWarehouseLocation());
                 product.setDescription(dto.getDescription());
                 product.setUpdatedAt(LocalDateTime.now());
-                
-                Product updated = productRepository.save(product);
-                return ResponseEntity.ok(toProductDto(updated));
+                return ResponseEntity.ok(toProductDto(productRepository.save(product)));
             })
             .orElse(ResponseEntity.notFound().build());
     }
-    
-    /**
-     * 상품 삭제 (비활성화)
-     */
+
     @DeleteMapping("/products/{id}")
     public ResponseEntity<Void> deleteProduct(@PathVariable UUID id) {
         log.info("🗑️ 상품 삭제: {}", id);
-        
         return productRepository.findById(id)
             .map(product -> {
                 product.setIsActive(false);
@@ -152,222 +104,126 @@ public class InventoryController {
             })
             .orElse(ResponseEntity.notFound().build());
     }
-    
-    /**
-     * 입고 처리 (창고 지정)
-     */
+
     @PostMapping("/inbound-warehouse")
     public ResponseEntity<ProductDto> processInboundWarehouse(@RequestBody InventoryDto.InboundWarehouseRequest request) {
-        log.info("📦 입고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}", 
+        log.info("📦 입고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}",
             request.getProductId(), request.getQuantity(), request.getWarehouse());
-        
         Product product = inventoryService.processInboundWithWarehouse(
-            request.getProductId(),
-            request.getQuantity(),
-            request.getWarehouse(),
-            request.getLocation(),
-            request.getNotes()
-        );
-        
+            request.getProductId(), request.getQuantity(),
+            request.getWarehouse(), request.getLocation(), request.getNotes());
         return ResponseEntity.ok(toProductDto(product));
     }
-    
-    /**
-     * 출고 처리 (창고 지정)
-     */
+
     @PostMapping("/outbound-warehouse")
     public ResponseEntity<ProductDto> processOutboundWarehouse(@RequestBody InventoryDto.OutboundWarehouseRequest request) {
-        log.info("📤 출고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}", 
+        log.info("📤 출고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}",
             request.getProductId(), request.getQuantity(), request.getWarehouse());
-        
         try {
             Product product = inventoryService.processOutboundWithWarehouse(
-                request.getProductId(),
-                request.getQuantity(),
-                request.getWarehouse(),
-                request.getOrderId(),
-                request.getNotes()
-            );
-            
+                request.getProductId(), request.getQuantity(),
+                request.getWarehouse(), request.getOrderId(), request.getNotes());
             return ResponseEntity.ok(toProductDto(product));
         } catch (IllegalStateException e) {
             log.error("❌ 출고 실패: {}", e.getMessage());
             return ResponseEntity.badRequest().build();
         }
     }
-    
-    /**
-     * 입고 처리
-     */
+
     @PostMapping("/inbound")
     public ResponseEntity<ProductDto> processInbound(@RequestBody InventoryDto.InboundRequest request) {
         log.info("📦 입고 처리 요청: 상품 ID={}, 수량={}", request.getProductId(), request.getQuantity());
-        
         Product product = inventoryService.processInbound(
-            request.getProductId(),
-            request.getQuantity(),
-            request.getLocation(),
-            request.getNotes()
-        );
-        
+            request.getProductId(), request.getQuantity(),
+            request.getLocation(), request.getNotes());
         return ResponseEntity.ok(toProductDto(product));
     }
-    
-    /**
-     * 출고 처리
-     */
+
     @PostMapping("/outbound")
     public ResponseEntity<ProductDto> processOutbound(@RequestBody InventoryDto.OutboundRequest request) {
         log.info("📤 출고 처리 요청: 상품 ID={}, 수량={}", request.getProductId(), request.getQuantity());
-        
         try {
             Product product = inventoryService.processOutbound(
-                request.getProductId(),
-                request.getQuantity(),
-                request.getOrderId(),
-                request.getNotes()
-            );
-            
+                request.getProductId(), request.getQuantity(),
+                request.getOrderId(), request.getNotes());
             return ResponseEntity.ok(toProductDto(product));
         } catch (IllegalStateException e) {
             log.error("❌ 출고 실패: {}", e.getMessage());
             return ResponseEntity.badRequest().build();
         }
     }
-    
-    /**
-     * 재고 조정
-     */
+
     @PostMapping("/adjust")
     public ResponseEntity<ProductDto> adjustInventory(@RequestBody InventoryDto.AdjustRequest request) {
         log.info("🔧 재고 조정 요청: 상품 ID={}, 수량={}", request.getProductId(), request.getQuantity());
-        
         Product product = inventoryService.adjustInventory(
-            request.getProductId(),
-            request.getQuantity(),
-            request.getReason()
-        );
-        
+            request.getProductId(), request.getQuantity(), request.getReason());
         return ResponseEntity.ok(toProductDto(product));
     }
-    
-    /**
-     * 안전 재고 미달 상품 조회
-     */
+
+    /** 재고 없는 상품 조회 (low-stock → out-of-stock으로 대체) */
     @GetMapping("/low-stock")
     public ResponseEntity<List<ProductDto>> getLowStockProducts() {
-        List<Product> products = inventoryService.getLowStockProducts();
-        
-        List<ProductDto> dtos = products.stream()
-            .map(this::toProductDto)
-            .collect(Collectors.toList());
-        
-        return ResponseEntity.ok(dtos);
+        List<Product> products = inventoryService.getOutOfStockProducts();
+        return ResponseEntity.ok(products.stream().map(this::toProductDto).collect(Collectors.toList()));
     }
-    
-    /**
-     * 재고 없는 상품 조회
-     */
+
     @GetMapping("/out-of-stock")
     public ResponseEntity<List<ProductDto>> getOutOfStockProducts() {
         List<Product> products = inventoryService.getOutOfStockProducts();
-        
-        List<ProductDto> dtos = products.stream()
-            .map(this::toProductDto)
-            .collect(Collectors.toList());
-        
-        return ResponseEntity.ok(dtos);
+        return ResponseEntity.ok(products.stream().map(this::toProductDto).collect(Collectors.toList()));
     }
-    
-    /**
-     * 전체 거래 내역 조회 (최신순, 페이징)
-     */
+
     @GetMapping("/transactions")
     public ResponseEntity<List<InventoryDto.TransactionResponse>> getAllTransactions(
             @RequestParam(required = false, defaultValue = "100") int limit) {
-        
         log.info("📋 전체 거래 내역 조회: limit={}", limit);
-        
         List<InventoryTransaction> transactions = inventoryService.getRecentTransactions(limit);
-        
         List<InventoryDto.TransactionResponse> dtos = transactions.stream()
-            .map(this::toTransactionDto)
-            .collect(Collectors.toList());
-        
+            .map(this::toTransactionDto).collect(Collectors.toList());
         log.info("✅ 거래 내역 {}건 조회", dtos.size());
-        
         return ResponseEntity.ok(dtos);
     }
-    
-    /**
-     * 거래 내역 검색 (상품명, SKU, 바코드)
-     */
+
     @GetMapping("/transactions/search")
     public ResponseEntity<List<InventoryDto.TransactionResponse>> searchTransactions(
             @RequestParam String keyword,
             @RequestParam(required = false, defaultValue = "100") int limit) {
-        
         log.info("🔍 거래 내역 검색: keyword={}, limit={}", keyword, limit);
-        
         List<InventoryTransaction> transactions = inventoryService.searchTransactions(keyword, limit);
-        
         List<InventoryDto.TransactionResponse> dtos = transactions.stream()
-            .map(this::toTransactionDto)
-            .collect(Collectors.toList());
-        
+            .map(this::toTransactionDto).collect(Collectors.toList());
         log.info("✅ 검색 결과 {}건", dtos.size());
-        
         return ResponseEntity.ok(dtos);
     }
-    
-    /**
-     * 재고 거래 내역 조회 (특정 상품)
-     */
+
     @GetMapping("/products/{id}/transactions")
     public ResponseEntity<List<InventoryDto.TransactionResponse>> getTransactionHistory(
             @PathVariable UUID id,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
-        
-        LocalDateTime start = startDate != null ? 
-            LocalDateTime.parse(startDate) : LocalDateTime.now().minusMonths(1);
-        LocalDateTime end = endDate != null ? 
-            LocalDateTime.parse(endDate) : LocalDateTime.now();
-        
+        LocalDateTime start = startDate != null ? LocalDateTime.parse(startDate) : LocalDateTime.now().minusMonths(1);
+        LocalDateTime end   = endDate   != null ? LocalDateTime.parse(endDate)   : LocalDateTime.now();
         List<InventoryTransaction> transactions = inventoryService.getTransactionHistory(id, start, end);
-        
-        List<InventoryDto.TransactionResponse> dtos = transactions.stream()
-            .map(this::toTransactionDto)
-            .collect(Collectors.toList());
-        
-        return ResponseEntity.ok(dtos);
+        return ResponseEntity.ok(transactions.stream().map(this::toTransactionDto).collect(Collectors.toList()));
     }
-    
-    /**
-     * 재고 통계
-     */
+
     @GetMapping("/stats")
     public ResponseEntity<InventoryDto.StatsResponse> getInventoryStats() {
-        List<Product> allProducts = productRepository.findByIsActiveTrueOrderByProductNameAsc();
-        List<Product> lowStock = inventoryService.getLowStockProducts();
-        List<Product> outOfStock = inventoryService.getOutOfStockProducts();
-        
+        List<Product> allProducts  = productRepository.findByIsActiveTrueOrderByProductNameAsc();
+        List<Product> outOfStock   = inventoryService.getOutOfStockProducts();
         int totalValue = allProducts.stream()
             .mapToInt(p -> (p.getCostPrice() != null ? p.getCostPrice().intValue() : 0) * p.getTotalStock())
             .sum();
-        
         InventoryDto.StatsResponse stats = InventoryDto.StatsResponse.builder()
             .totalProducts(allProducts.size())
             .totalStockValue(totalValue)
-            .lowStockCount(lowStock.size())
+            .lowStockCount(0)  // 안전재고 제거 → 항상 0
             .outOfStockCount(outOfStock.size())
             .build();
-        
         return ResponseEntity.ok(stats);
     }
-    
-    // DTO 변환 메서드
-    
+
     private ProductDto toProductDto(Product product) {
         return ProductDto.builder()
             .productId(product.getProductId())
@@ -380,23 +236,20 @@ public class InventoryController {
             .totalStock(product.getTotalStock())
             .availableStock(product.getAvailableStock())
             .reservedStock(product.getReservedStock())
-            .safetyStock(product.getSafetyStock())
             .warehouseLocation(product.getWarehouseLocation())
             .warehouseStockAnyang(product.getWarehouseStockAnyang())
             .warehouseStockIcheon(product.getWarehouseStockIcheon())
             .warehouseStockBucheon(product.getWarehouseStockBucheon())
             .isActive(product.getIsActive())
             .description(product.getDescription())
-            .isBelowSafetyStock(product.isBelowSafetyStock())
             .isOutOfStock(product.isOutOfStock())
             .createdAt(product.getCreatedAt())
             .updatedAt(product.getUpdatedAt())
             .build();
     }
-    
+
     private InventoryDto.TransactionResponse toTransactionDto(InventoryTransaction transaction) {
         Product product = transaction.getProduct();
-        
         return InventoryDto.TransactionResponse.builder()
             .transactionId(transaction.getTransactionId())
             .productId(product != null ? product.getProductId() : null)

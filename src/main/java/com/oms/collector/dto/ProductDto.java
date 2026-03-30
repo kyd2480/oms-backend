@@ -28,14 +28,12 @@ public class ProductDto {
     private Integer totalStock;
     private Integer availableStock;
     private Integer reservedStock;
-    private Integer safetyStock;
     private String warehouseLocation;
     private Integer warehouseStockAnyang;    // 1.본사(안양) 재고
     private Integer warehouseStockIcheon;    // 2.고백창고(이천) 재고
     private Integer warehouseStockBucheon;   // 3.부천검수창고 재고
     private Boolean isActive;
     private String description;
-    private Boolean isBelowSafetyStock;
     private Boolean isOutOfStock;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

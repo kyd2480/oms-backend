@@ -195,7 +195,6 @@ public class ProductInitController {
                         .totalStock(totalStock)
                         .availableStock(totalStock)
                         .reservedStock(0)
-                        .safetyStock(10)
                         .warehouseLocation(fields.length > 6 ? fields[6].replaceAll("=\"\"?", "").trim() : "")
                         .warehouseStockAnyang(anyangStock)
                         .warehouseStockIcheon(icheonStock)
