@@ -57,9 +57,6 @@ public class Product {
     @Column(name = "reserved_stock")
     private Integer reservedStock = 0;  // 예약 재고 (주문 대기)
     
-    @Column(name = "safety_stock")
-    private Integer safetyStock = 0;  // 안전 재고
-    
     @Column(name = "warehouse_location", length = 100)
     private String warehouseLocation;  // 창고 위치
     
@@ -139,13 +136,6 @@ public class Product {
         }
         this.totalStock -= quantity;
         this.reservedStock -= quantity;
-    }
-    
-    /**
-     * 안전 재고 미달 여부
-     */
-    public boolean isBelowSafetyStock() {
-        return this.availableStock <= this.safetyStock;
     }
     
     /**

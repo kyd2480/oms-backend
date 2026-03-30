@@ -172,11 +172,6 @@ public class InventoryService {
             product.getProductName(), warehouse.getName(),
             transaction.getBeforeStock(), transaction.getAfterStock());
 
-        if (saved.isBelowSafetyStock()) {
-            log.warn("⚠️ 안전 재고 미달: {} (현재: {}, 안전: {})",
-                saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
-        }
-
         return saved;
     }
 
@@ -226,11 +221,6 @@ public class InventoryService {
 
         log.info("✅ 출고 완료: {} - 재고 {} → {}",
             product.getProductName(), transaction.getBeforeStock(), transaction.getAfterStock());
-
-        if (saved.isBelowSafetyStock()) {
-            log.warn("⚠️ 안전 재고 미달: {} (현재: {}, 안전: {})",
-                saved.getProductName(), saved.getAvailableStock(), saved.getSafetyStock());
-        }
 
         return saved;
     }
@@ -354,6 +344,55 @@ public class InventoryService {
         } catch (Exception e) {
             log.error("❌ 창고별 재고 업데이트 실패: {} ({}) - {}", warehouseName, warehouseCode, e.getMessage(), e);
         }
+    }
+
+    /**
+     * 반품 취소용 강제 출고 — 재고 부족 체크 없이 차감
+     */
+    @Transactional
+    public void forceOutboundForReturn(UUID productId, int quantity,
+                                       String warehouseCode, String notes) {
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+            .orElse(null);
+        String warehouseName = warehouse != null ? warehouse.getName() : warehouseCode;
+
+        switch (warehouseCode) {
+            case "ANYANG":
+                product.setWarehouseStockAnyang(Math.max(0, product.getWarehouseStockAnyang() - quantity));
+                break;
+            case "ICHEON_BOX":
+            case "ICHEON_PCS":
+                product.setWarehouseStockIcheon(Math.max(0, product.getWarehouseStockIcheon() - quantity));
+                break;
+            case "BUCHEON":
+                product.setWarehouseStockBucheon(Math.max(0, product.getWarehouseStockBucheon() - quantity));
+                break;
+            default:
+                // 신규 창고: 0 이하로 내려가지 않도록 처리
+                ProductWarehouseStock ws = warehouseStockRepository
+                    .findByProductIdAndWarehouseCode(productId, warehouseCode)
+                    .orElseGet(() -> ProductWarehouseStock.builder()
+                        .productId(productId).warehouseCode(warehouseCode)
+                        .warehouseName(warehouseName).stock(0).build());
+                ws.setStock(Math.max(0, ws.getStock() - quantity));
+                warehouseStockRepository.save(ws);
+        }
+
+        // 총재고 차감 (0 이하 방지)
+        int newTotal = Math.max(0, product.getTotalStock() - quantity);
+        int newAvail = Math.max(0, product.getAvailableStock() - quantity);
+        product.setTotalStock(newTotal);
+        product.setAvailableStock(newAvail);
+
+        String detailedNotes = String.format("창고:%s(%s) | %s", warehouseName, warehouseCode, notes);
+        InventoryTransaction transaction = InventoryTransaction.createOutbound(
+            product, quantity, null, detailedNotes);
+        transactionRepository.save(transaction);
+        productRepository.save(product);
+        log.info("✅ 강제 출고 완료 (반품 취소): {} - 창고:{}", product.getProductName(), warehouseName);
     }
 
     /**
