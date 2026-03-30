@@ -2,9 +2,11 @@ package com.oms.collector.service;
 
 import com.oms.collector.entity.InventoryTransaction;
 import com.oms.collector.entity.Product;
+import com.oms.collector.entity.ProductWarehouseStock;
 import com.oms.collector.entity.Warehouse;
 import com.oms.collector.repository.InventoryTransactionRepository;
 import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.repository.ProductWarehouseStockRepository;
 import com.oms.collector.repository.WarehouseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,12 +35,13 @@ public class InventoryService {
 
     private final ProductRepository productRepository;
     private final InventoryTransactionRepository transactionRepository;
-    private final WarehouseRepository warehouseRepository;  // ✅ 추가
+    private final WarehouseRepository warehouseRepository;
+    private final ProductWarehouseStockRepository warehouseStockRepository; // ✅ 창고별 재고
 
-    // 레거시 Product 컬럼과 매핑되는 창고 코드
+    // 레거시 Product 컬럼과 매핑되는 창고 코드 (기존 3개만 유지)
     private static final String ANYANG  = "ANYANG";
     private static final String ICHEON  = "ICHEON_BOX";
-    private static final String ICHEON2 = "ICHEON_PCS";
+    private static final String ICHEON2 = "ICHEON_PCS";   // 별칭 혹은 레거시
     private static final String BUCHEON = "BUCHEON";
 
     /**
@@ -62,21 +65,24 @@ public class InventoryService {
             .orElseThrow(() -> new IllegalArgumentException(
                 "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
 
-        // 레거시 3개 컬럼 창고는 개별 컬럼 업데이트, 그 외는 총재고만 반영
+        // ANYANG / ICHEON_BOX / ICHEON_PCS / BUCHEON 은 Product 레거시 컬럼
+        // 그 외 모든 창고는 product_warehouse_stock 테이블
         switch (warehouse.getCode()) {
-            case ANYANG:
+            case "ANYANG":
                 product.setWarehouseStockAnyang(product.getWarehouseStockAnyang() + quantity);
                 break;
-            case ICHEON:
-            case ICHEON2:
+            case "ICHEON_BOX":
+            case "ICHEON_PCS":
                 product.setWarehouseStockIcheon(product.getWarehouseStockIcheon() + quantity);
                 break;
-            case BUCHEON:
+            case "BUCHEON":
                 product.setWarehouseStockBucheon(product.getWarehouseStockBucheon() + quantity);
                 break;
             default:
-                // 신규 창고: 총 재고에만 반영 (아래 increaseStock에서 처리)
-                log.debug("신규 창고 입고 (총재고만 반영): {}", warehouse.getCode());
+                // 신규 창고 전부: product_warehouse_stock 테이블에 기록
+                updateWarehouseStock(product.getProductId(), warehouse.getCode(),
+                    warehouse.getName(), quantity);
+                log.debug("신규 창고 입고 (warehouse_stock 테이블): {} {}", warehouse.getCode(), quantity);
         }
 
         // 총 재고 증가
@@ -115,41 +121,39 @@ public class InventoryService {
             .orElseThrow(() -> new IllegalArgumentException(
                 "존재하지 않거나 비활성화된 창고입니다: " + warehouseCode));
 
-        // 레거시 3개 컬럼 창고는 개별 컬럼 차감 + 재고 부족 검증
+        // 레거시 컬럼 창고는 개별 컬럼 차감, 신규 창고는 product_warehouse_stock 테이블
         int warehouseStock;
         switch (warehouse.getCode()) {
-            case ANYANG:
+            case "ANYANG":
                 warehouseStock = product.getWarehouseStockAnyang();
-                if (warehouseStock < quantity) {
-                    throw new IllegalStateException(
-                        warehouse.getName() + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
-                }
+                if (warehouseStock < quantity)
+                    throw new IllegalStateException(warehouse.getName() + " 재고 부족 (현재: " + warehouseStock + "개)");
                 product.setWarehouseStockAnyang(warehouseStock - quantity);
                 break;
-            case ICHEON:
-            case ICHEON2:
+            case "ICHEON_BOX":
+            case "ICHEON_PCS":
                 warehouseStock = product.getWarehouseStockIcheon();
-                if (warehouseStock < quantity) {
-                    throw new IllegalStateException(
-                        warehouse.getName() + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
-                }
+                if (warehouseStock < quantity)
+                    throw new IllegalStateException(warehouse.getName() + " 재고 부족 (현재: " + warehouseStock + "개)");
                 product.setWarehouseStockIcheon(warehouseStock - quantity);
                 break;
-            case BUCHEON:
+            case "BUCHEON":
                 warehouseStock = product.getWarehouseStockBucheon();
-                if (warehouseStock < quantity) {
-                    throw new IllegalStateException(
-                        warehouse.getName() + " 재고가 부족합니다. (현재: " + warehouseStock + "개)");
-                }
+                if (warehouseStock < quantity)
+                    throw new IllegalStateException(warehouse.getName() + " 재고 부족 (현재: " + warehouseStock + "개)");
                 product.setWarehouseStockBucheon(warehouseStock - quantity);
                 break;
             default:
-                // 신규 창고: 총 재고에서 차감 (아래 decreaseStock에서 처리)
-                if (product.getTotalStock() < quantity) {
-                    throw new IllegalStateException(
-                        warehouse.getName() + " 재고가 부족합니다. (현재: " + product.getTotalStock() + "개)");
-                }
-                log.debug("신규 창고 출고 (총재고만 차감): {}", warehouse.getCode());
+                // 신규 창고: product_warehouse_stock 테이블에서 차감
+                ProductWarehouseStock ws = warehouseStockRepository
+                    .findByProductIdAndWarehouseCode(product.getProductId(), warehouse.getCode())
+                    .orElse(null);
+                int wsStock = ws != null ? ws.getStock() : 0;
+                if (wsStock < quantity)
+                    throw new IllegalStateException(warehouse.getName() + " 재고 부족 (현재: " + wsStock + "개)");
+                updateWarehouseStock(product.getProductId(), warehouse.getCode(),
+                    warehouse.getName(), -quantity);
+                log.debug("신규 창고 출고 (warehouse_stock 테이블): {} -{}", warehouse.getCode(), quantity);
         }
 
         // 총 재고 차감
@@ -323,5 +327,40 @@ public class InventoryService {
     public List<InventoryTransaction> searchTransactions(String keyword, int limit) {
         Pageable pageable = PageRequest.of(0, limit);
         return transactionRepository.searchTransactionsWithProduct(keyword, pageable);
+    }
+
+    /**
+     * 신규 창고별 재고 업데이트 (ProductWarehouseStock 테이블)
+     * quantity > 0 : 입고, quantity < 0 : 출고
+     * 같은 트랜잭션 내에서 호출되므로 @Transactional 없음
+     */
+    private void updateWarehouseStock(UUID productId, String warehouseCode,
+                                      String warehouseName, int quantity) {
+        try {
+            ProductWarehouseStock ws = warehouseStockRepository
+                .findByProductIdAndWarehouseCode(productId, warehouseCode)
+                .orElseGet(() -> ProductWarehouseStock.builder()
+                    .productId(productId)
+                    .warehouseCode(warehouseCode)
+                    .warehouseName(warehouseName)
+                    .stock(0)
+                    .build());
+
+            int before = ws.getStock();
+            ws.setStock(before + quantity);
+            warehouseStockRepository.save(ws);
+            log.info("✅ 창고별 재고 업데이트: {} ({}) {} → {}",
+                warehouseName, warehouseCode, before, ws.getStock());
+        } catch (Exception e) {
+            log.error("❌ 창고별 재고 업데이트 실패: {} ({}) - {}", warehouseName, warehouseCode, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 창고별 재고 조회
+     */
+    @Transactional(readOnly = true)
+    public List<ProductWarehouseStock> getWarehouseStocks(UUID productId) {
+        return warehouseStockRepository.findByProductId(productId);
     }
 }
