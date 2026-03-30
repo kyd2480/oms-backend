@@ -297,9 +297,17 @@ public class ReturnController {
             String notes = "반품 입고 (" + ret.getOrderNo() + ") "
                 + ("DEFECTIVE".equals(item.itemResult) ? "[불량]" : "[정상]");
 
-            inventoryService.processInboundWithWarehouse(
-                product.getProductId(), item.quantity, itemWarehouse, null, notes
-            );
+            if ("DEFECTIVE".equals(item.itemResult)) {
+                // 불량 → 창고별 재고만 기록, 총재고/가용재고 변경 없음
+                inventoryService.processDefectiveInbound(
+                    product.getProductId(), item.quantity, itemWarehouse, notes
+                );
+            } else {
+                // 정상 → 총재고/가용재고 + 창고별 재고 모두 증가
+                inventoryService.processInboundWithWarehouse(
+                    product.getProductId(), item.quantity, itemWarehouse, null, notes
+                );
+            }
 
             // 취소 시 차감을 위해 내역 저장
             Map<String,Object> record = new LinkedHashMap<>();
@@ -395,6 +403,14 @@ public class ReturnController {
                         );
                         rollbackMsgs.add(productName + " " + quantity + "개 차감 ← " + warehouse);
                         log.info("반품 취소 차감: {} {}개 ← {}", productName, quantity, warehouse);
+                    } catch (IllegalStateException e) {
+                        // 재고 부족이어도 총재고/창고재고 강제 차감 (반품 취소이므로)
+                        log.warn("반품 취소 재고 부족 → 강제 차감: {} {}개 ← {}", productName, quantity, warehouse);
+                        inventoryService.forceOutboundForReturn(
+                            productId, quantity, warehouse,
+                            "반품 취소 강제 차감 (" + ret.getOrderNo() + ")"
+                        );
+                        rollbackMsgs.add(productName + " " + quantity + "개 강제 차감 ← " + warehouse);
                     } catch (Exception e) {
                         rollbackMsgs.add(productName + " 차감 실패: " + e.getMessage());
                         log.warn("반품 취소 차감 실패: productId={}, {}", productId, e.getMessage());

@@ -105,8 +105,33 @@ public class InventoryService {
     }
 
     /**
-     * 출고 처리 (창고별)
+     * 불량 반품 입고 — 창고별 재고만 기록, 총재고/가용재고 변경 없음
      */
+    @Transactional
+    public void processDefectiveInbound(UUID productId, int quantity,
+                                        String warehouseCode, String notes) {
+        log.info("📦 불량 입고 (창고별 재고만): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouseCode);
+
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+            .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 창고: " + warehouseCode));
+
+        // 창고별 재고만 업데이트 (총재고/가용재고 변경 없음)
+        updateWarehouseStock(product.getProductId(), warehouse.getCode(),
+            warehouse.getName(), quantity);
+
+        // 거래 내역 기록
+        String detailedNotes = String.format("창고:%s(%s) | %s",
+            warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
+        InventoryTransaction transaction = InventoryTransaction.createInbound(
+            product, quantity, warehouse.getName(), detailedNotes);
+        transactionRepository.save(transaction);
+        productRepository.save(product);
+
+        log.info("✅ 불량 입고 완료: {} - 창고:{}", product.getProductName(), warehouse.getName());
+    }
     @Transactional
     public Product processOutboundWithWarehouse(UUID productId, int quantity,
                                                 String warehouseCode, UUID orderId, String notes) {
