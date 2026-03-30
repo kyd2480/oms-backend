@@ -128,8 +128,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             oi.product_name     AS productName,
             oi.product_code     AS productCode,
             oi.quantity         AS quantity,
-            NULL::uuid          AS productId,
-            NULL                AS sku,
+            CAST(NULL AS uuid)  AS productId,
+            CAST(NULL AS VARCHAR) AS sku,
             0                   AS warehouseStockAnyang,
             0                   AS warehouseStockIcheon,
             0                   AS warehouseStockBucheon
