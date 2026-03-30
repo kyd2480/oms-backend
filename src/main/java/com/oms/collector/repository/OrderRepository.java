@@ -56,6 +56,22 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         @Param("end")     java.time.LocalDateTime end,
         @Param("keyword") String keyword);
 
+    @Query("SELECT o FROM Order o WHERE o.orderedAt BETWEEN :start AND :end " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> findByDateRange(
+        @Param("start") java.time.LocalDateTime start,
+        @Param("end")   java.time.LocalDateTime end);
+
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND o.updatedAt BETWEEN :start AND :end ORDER BY o.updatedAt DESC")
+    List<Order> findByOrderStatusAndUpdatedAtRange(
+        @Param("status") Order.OrderStatus status,
+        @Param("start")  java.time.LocalDateTime start,
+        @Param("end")    java.time.LocalDateTime end);
+
+    @Query("SELECT COUNT(o) FROM Order o WHERE DATE(o.orderedAt) = CURRENT_DATE")
+    long countTodayOrders();
+
     // ────────────────────────────────────────────────────────────────────────
     // 재고 매칭용 네이티브 쿼리
     // orders + order_items + products 를 DB에서 직접 JOIN
