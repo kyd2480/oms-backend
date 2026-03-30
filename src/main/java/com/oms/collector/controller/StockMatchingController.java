@@ -116,12 +116,15 @@ public class StockMatchingController {
         @RequestParam(defaultValue = "0")   int page,
         @RequestParam(defaultValue = "200") int size
     ) {
-        log.info("재고 매칭: warehouse={}", warehouseCode);
+        log.info("재고 매칭 시작: warehouse={}", warehouseCode);
+        long t0 = System.currentTimeMillis();
 
-        // ── 주문 로딩 (JOIN FETCH로 N+1 완전 제거) ───────────────
+        // ── 주문 로딩 ─────────────────────────────────────────────
         List<Order> orders = orderRepository.findByOrderStatusWithItems(Order.OrderStatus.PENDING);
+        log.info("[PERF] 주문 로딩 완료: {}건 → {}ms", orders.size(), System.currentTimeMillis() - t0);
+        long t1 = System.currentTimeMillis();
 
-        // ── 전체 상품 캐시 1회 로딩 (N+1 방지) ───────────────────
+        // ── 전체 상품 캐시 1회 로딩 ───────────────────────────────
         List<Product> allProducts = productRepository.findAll();
         Map<String, Product> skuMap     = new HashMap<>();
         Map<String, Product> barcodeMap = new HashMap<>();
@@ -131,21 +134,34 @@ public class StockMatchingController {
             if (prod.getBarcode() != null && !prod.getBarcode().isBlank())
                 barcodeMap.put(prod.getBarcode().toLowerCase(), prod);
         });
+        log.info("[PERF] 상품 캐시 완료: {}건 → {}ms", allProducts.size(), System.currentTimeMillis() - t1);
+        long t2 = System.currentTimeMillis();
 
-        // ── 신규 창고 재고 전체 캐시 (warehouseCode별 productId → stock) ──
+        // ── 창고 재고 캐시 ────────────────────────────────────────
         Map<UUID, Integer> warehouseStockCache = new HashMap<>();
         warehouseStockRepository.findByWarehouseCode(warehouseCode)
             .forEach(ws -> warehouseStockCache.put(ws.getProductId(), ws.getStock()));
-        // ─────────────────────────────────────────────────────────
+        log.info("[PERF] 창고재고 캐시 완료: {}ms", System.currentTimeMillis() - t2);
+        long t3 = System.currentTimeMillis();
 
+        // ── 매칭 루프 ─────────────────────────────────────────────
         List<MatchItemDTO> items = new ArrayList<>();
+        int nameMatchCount = 0;
         for (Order o : orders) {
             for (OrderItem item : o.getItems()) {
+                String code = item.getProductCode();
+                boolean codeMatched = code != null && !code.isBlank() && !isChannelProductCode(code)
+                    && (skuMap.containsKey(code.toLowerCase()) || barcodeMap.containsKey(code.toLowerCase()));
+                if (!codeMatched) nameMatchCount++;
+
                 Product product = findProductFromCache(item, skuMap, barcodeMap, allProducts);
                 int stock = getWarehouseStockCached(product, warehouseCode, warehouseStockCache);
                 items.add(new MatchItemDTO(o, item, product, stock));
             }
         }
+        log.info("[PERF] 매칭 루프 완료: 아이템{}건 (상품명매칭{}건) → {}ms",
+            items.size(), nameMatchCount, System.currentTimeMillis() - t3);
+        long t4 = System.currentTimeMillis();
 
         // 정렬: FULL → PARTIAL → IMPOSSIBLE → NOT_MATCHED
         items.sort(Comparator.comparingInt(i -> switch (i.shipStatus) {
@@ -154,6 +170,7 @@ public class StockMatchingController {
             case "IMPOSSIBLE"  -> 2;
             default            -> 3;
         }));
+        log.info("[PERF] 정렬 완료: {}ms / 전체: {}ms", System.currentTimeMillis() - t4, System.currentTimeMillis() - t0);
 
         log.info("매칭 완료: 완전:{}, 부분:{}, 불가:{}, 미매칭:{}",
             items.stream().filter(i -> "FULL".equals(i.shipStatus)).count(),
