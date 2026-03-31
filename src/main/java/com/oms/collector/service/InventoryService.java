@@ -106,10 +106,6 @@ public class InventoryService {
     }
 
     /**
-     * 접수 시 창고 입고 (REQUIRES_NEW) — 실패해도 외부 트랜잭션에 영향 없음
-     * 창고 미존재, 상품 미매칭 등 예외를 조용히 처리
-     */
-    /**
      * 접수 시 창고 입고 (REQUIRES_NEW) — 독립 트랜잭션으로 실행
      * 실패 시 예외를 던져 호출자가 접수 전체를 중단할 수 있도록 함
      */
@@ -129,6 +125,48 @@ public class InventoryService {
         transactionRepository.save(tx);
         productRepository.save(product);
         log.info("✅ 접수 입고: {} {}개 → {}", product.getProductName(), quantity, warehouse.getName());
+    }
+
+    /**
+     * 창고 간 이동 — fromWarehouse 재고 차감, toWarehouse 재고 증가
+     * normalTransfer=true  → toWarehouse 입고 시 총재고/가용재고도 증가 (정상 검수)
+     * normalTransfer=false → 창고별 재고만 이동, 총재고 불변 (불량 검수)
+     */
+    @Transactional
+    public void warehouseTransfer(UUID productId, int quantity,
+                                  String fromWarehouseCode, String toWarehouseCode,
+                                  boolean normalTransfer, String notes) {
+        log.info("🔄 창고 이동: {} {}개 {} → {}", productId, quantity, fromWarehouseCode, toWarehouseCode);
+
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다: " + productId));
+
+        Warehouse fromWh = warehouseRepository.findByCode(fromWarehouseCode)
+            .orElseThrow(() -> new IllegalArgumentException("출발 창고 없음: " + fromWarehouseCode));
+        Warehouse toWh = warehouseRepository.findByCode(toWarehouseCode)
+            .orElseThrow(() -> new IllegalArgumentException("도착 창고 없음: " + toWarehouseCode));
+
+        // 출발 창고 재고 차감
+        updateWarehouseStock(product.getProductId(), fromWh.getCode(), fromWh.getName(), -quantity);
+
+        // 도착 창고 재고 증가
+        updateWarehouseStock(product.getProductId(), toWh.getCode(), toWh.getName(), quantity);
+
+        // 정상 검수 이동: 총재고/가용재고 증가 (ANYANG_KO_RETURN은 총재고 미반영이었으므로 여기서 반영)
+        if (normalTransfer) {
+            product.increaseStock(quantity);
+            productRepository.save(product);
+        }
+
+        // 거래 내역 기록
+        String detailedNotes = String.format("창고이동:%s→%s | %s",
+            fromWh.getName(), toWh.getName(), notes != null ? notes : "");
+        InventoryTransaction tx = InventoryTransaction.createInbound(
+            product, quantity, toWh.getName(), detailedNotes);
+        transactionRepository.save(tx);
+
+        log.info("✅ 창고 이동 완료: {} {}개 {} → {}", product.getProductName(), quantity,
+            fromWh.getName(), toWh.getName());
     }
 
     /**

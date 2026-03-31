@@ -106,17 +106,22 @@ public class InventoryController {
     }
 
     @PostMapping("/inbound-warehouse")
-    public ResponseEntity<ProductDto> processInboundWarehouse(@RequestBody InventoryDto.InboundWarehouseRequest request) {
+    public ResponseEntity<?> processInboundWarehouse(@RequestBody InventoryDto.InboundWarehouseRequest request) {
         log.info("📦 입고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}",
             request.getProductId(), request.getQuantity(), request.getWarehouse());
-        Product product = inventoryService.processInboundWithWarehouse(
-            request.getProductId(), request.getQuantity(),
-            request.getWarehouse(), request.getLocation(), request.getNotes());
-        return ResponseEntity.ok(toProductDto(product));
+        try {
+            Product product = inventoryService.processInboundWithWarehouse(
+                request.getProductId(), request.getQuantity(),
+                request.getWarehouse(), request.getLocation(), request.getNotes());
+            return ResponseEntity.ok(toProductDto(product));
+        } catch (IllegalArgumentException e) {
+            log.error("❌ 입고 실패: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
     }
 
     @PostMapping("/outbound-warehouse")
-    public ResponseEntity<ProductDto> processOutboundWarehouse(@RequestBody InventoryDto.OutboundWarehouseRequest request) {
+    public ResponseEntity<?> processOutboundWarehouse(@RequestBody InventoryDto.OutboundWarehouseRequest request) {
         log.info("📤 출고 처리 요청 (창고별): 상품 ID={}, 수량={}, 창고={}",
             request.getProductId(), request.getQuantity(), request.getWarehouse());
         try {
@@ -124,9 +129,9 @@ public class InventoryController {
                 request.getProductId(), request.getQuantity(),
                 request.getWarehouse(), request.getOrderId(), request.getNotes());
             return ResponseEntity.ok(toProductDto(product));
-        } catch (IllegalStateException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
             log.error("❌ 출고 실패: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
         }
     }
 

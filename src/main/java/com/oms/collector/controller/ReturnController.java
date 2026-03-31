@@ -367,35 +367,30 @@ public class ReturnController {
             InspectRequest.RestockItem item = e.getKey();
             Product product = e.getValue();
 
-            String itemWarehouse = (item.warehouseCode != null && !item.warehouseCode.isBlank())
-                ? item.warehouseCode : req.warehouseCode;
+            boolean isDefective = "DEFECTIVE".equals(item.itemResult);
+            // 정상: ANYANG_KO_RETURN → ANYANG (총재고 증가)
+            // 불량: ANYANG_KO_RETURN → RETURN_POOR (총재고 불변)
+            String toWarehouse = isDefective ? "RETURN_POOR" : "ANYANG";
+            String notes = "반품 검수 이동 (" + ret.getOrderNo() + ") "
+                + (isDefective ? "[불량]" : "[정상]");
 
-            String notes = "반품 입고 (" + ret.getOrderNo() + ") "
-                + ("DEFECTIVE".equals(item.itemResult) ? "[불량]" : "[정상]");
+            inventoryService.warehouseTransfer(
+                product.getProductId(), item.quantity,
+                "ANYANG_KO_RETURN", toWarehouse,
+                !isDefective, notes
+            );
 
-            if ("DEFECTIVE".equals(item.itemResult)) {
-                // 불량 → 창고별 재고만 기록, 총재고/가용재고 변경 없음
-                inventoryService.processDefectiveInbound(
-                    product.getProductId(), item.quantity, itemWarehouse, notes
-                );
-            } else {
-                // 정상 → 총재고/가용재고 + 창고별 재고 모두 증가
-                inventoryService.processInboundWithWarehouse(
-                    product.getProductId(), item.quantity, itemWarehouse, null, notes
-                );
-            }
-
-            // 취소 시 차감을 위해 내역 저장
+            // 취소 시 차감을 위해 도착 창고 기준으로 내역 저장
             Map<String,Object> record = new LinkedHashMap<>();
             record.put("productId",    product.getProductId().toString());
             record.put("productName",  product.getProductName());
             record.put("sku",          product.getSku());
             record.put("quantity",     item.quantity);
-            record.put("warehouseCode", itemWarehouse);
+            record.put("warehouseCode", toWarehouse);
             record.put("itemResult",   item.itemResult);
             stockedList.add(record);
 
-            stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + itemWarehouse);
+            stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + toWarehouse);
             log.info("반품 입고: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
         }
 
