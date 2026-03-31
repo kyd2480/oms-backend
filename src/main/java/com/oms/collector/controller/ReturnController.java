@@ -391,7 +391,7 @@ public class ReturnController {
             stockedList.add(record);
 
             stockMsgs.add(product.getProductName() + " " + item.quantity + "개 → " + toWarehouse);
-            log.info("반품 입고: {} {}개 → {}", product.getSku(), item.quantity, itemWarehouse);
+            log.info("반품 검수 이동: {} {}개 → {}", product.getSku(), item.quantity, toWarehouse);
         }
 
         // 입고 내역 JSON으로 저장
