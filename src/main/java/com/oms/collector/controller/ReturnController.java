@@ -267,12 +267,15 @@ public class ReturnController {
     public ResponseEntity<List<ReturnDTO>> list(
         @RequestParam(required = false) String status,
         @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) String orderNo,
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate
     ) {
         List<ProductReturn> returns;
 
-        if (keyword != null && !keyword.isBlank()) {
+        if (orderNo != null && !orderNo.isBlank()) {
+            returns = returnRepository.findByOrderNoOrderByCreatedAtDesc(orderNo.trim());
+        } else if (keyword != null && !keyword.isBlank()) {
             returns = returnRepository.searchByKeyword(keyword.trim());
         } else if (status != null && !status.isBlank() && !status.equals("ALL")) {
             returns = returnRepository.findByStatusOrderByCreatedAtDesc(
