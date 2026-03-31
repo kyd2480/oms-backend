@@ -198,6 +198,7 @@ public class ReturnController {
         returnRepository.save(ret);
 
         // 접수 판정: 정상 → 국내온라인반품 창고 기록, 불량 → 반품불량 창고 기록 (모두 총재고 불변)
+        List<Map<String,Object>> stockedList = new ArrayList<>();
         if (req.items != null) {
             for (Map<String, Object> item : req.items) {
                 String itemResult = (String) item.get("result");
@@ -228,11 +229,31 @@ public class ReturnController {
                     log.warn("접수 창고 코드 없음 — 입고 스킵: {}", productCode);
                     continue;
                 }
+
                 // REQUIRES_NEW — 실패 시 예외 전파, 접수 전체 롤백
                 inventoryService.tryAcceptanceInbound(
                     product.getProductId(), qty, wh,
                     "반품 접수 입고 [" + (isNormal ? "정상" : "불량") + "] (" + ret.getOrderNo() + ")"
                 );
+
+                // 취소 시 차감을 위해 내역 저장
+                Map<String,Object> record = new LinkedHashMap<>();
+                record.put("productId",    product.getProductId().toString());
+                record.put("productName",  product.getProductName());
+                record.put("sku",          product.getSku());
+                record.put("quantity",     qty);
+                record.put("warehouseCode", wh);
+                record.put("itemResult",   itemResult);
+                stockedList.add(record);
+            }
+        }
+
+        if (!stockedList.isEmpty()) {
+            try {
+                ret.setStockedItems(mapper.writeValueAsString(stockedList));
+                returnRepository.save(ret);
+            } catch (Exception e) {
+                log.warn("stockedItems 저장 실패: {}", e.getMessage());
             }
         }
 
