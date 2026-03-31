@@ -223,7 +223,11 @@ public class ReturnController {
                         + "재고 관리에서 바코드 또는 SKU를 확인해주세요.");
                 }
 
-                String wh = isNormal ? "ANYANG_RETURN_ONLINE" : "RETURN_POOR";
+                String wh = (String) item.get("warehouseCode");
+                if (wh == null || wh.isBlank()) {
+                    log.warn("접수 창고 코드 없음 — 입고 스킵: {}", productCode);
+                    continue;
+                }
                 // REQUIRES_NEW — 실패 시 예외 전파, 접수 전체 롤백
                 inventoryService.tryAcceptanceInbound(
                     product.getProductId(), qty, wh,
