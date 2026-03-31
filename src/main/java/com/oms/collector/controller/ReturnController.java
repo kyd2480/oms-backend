@@ -50,7 +50,10 @@ public class ReturnController {
         public String returnReason;
         public String returnTrackingNo;
         public String carrierName;
-        public List<java.util.Map<String, Object>> items; // productCode 포함
+        public List<java.util.Map<String, Object>> items; // productCode + result 포함
+        public String receiveResult;        // NORMAL | DEFECTIVE (전체 판정)
+        public String receiveWarehouseCode; // 접수 창고 코드
+        public String receiveMemo;          // 접수 작업메모
     }
 
     public static class InspectRequest {
@@ -105,6 +108,9 @@ public class ReturnController {
         public String  createdAt;
         public String  updatedAt;
         public String  completedAt;
+        public String  receiveResult;
+        public String  receiveWarehouseCode;
+        public String  receiveMemo;
         public String  stockedItems;
         public List<java.util.Map<String, Object>> items; // productCode 포함
 
@@ -132,7 +138,10 @@ public class ReturnController {
             this.createdAt       = r.getCreatedAt()   != null ? r.getCreatedAt().toString()   : null;
             this.updatedAt       = r.getUpdatedAt()   != null ? r.getUpdatedAt().toString()   : null;
             this.completedAt     = r.getCompletedAt() != null ? r.getCompletedAt().toString() : null;
-            this.stockedItems    = r.getStockedItems();
+            this.receiveResult        = r.getReceiveResult();
+            this.receiveWarehouseCode = r.getReceiveWarehouseCode();
+            this.receiveMemo          = r.getReceiveMemo();
+            this.stockedItems         = r.getStockedItems();
             // itemsJson 파싱
             if (r.getItemsJson() != null && !r.getItemsJson().isBlank()) {
                 try {
@@ -167,21 +176,85 @@ public class ReturnController {
             .returnReason(req.returnReason)
             .returnTrackingNo(req.returnTrackingNo)
             .carrierName(req.carrierName)
+            .receiveResult(req.receiveResult)
+            .receiveWarehouseCode(req.receiveWarehouseCode)
+            .receiveMemo(req.receiveMemo)
             .status(ProductReturn.ReturnStatus.REQUESTED)
             .source("MANUAL")
             .build();
 
-        // items (productCode 포함) JSON 저장
+        com.fasterxml.jackson.databind.ObjectMapper mapper =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+        // items (productCode + result 포함) JSON 저장
         if (req.items != null && !req.items.isEmpty()) {
             try {
-                ret.setItemsJson(new com.fasterxml.jackson.databind.ObjectMapper()
-                    .writeValueAsString(req.items));
+                ret.setItemsJson(mapper.writeValueAsString(req.items));
             } catch (Exception e) {
                 log.warn("itemsJson 직렬화 실패: {}", e.getMessage());
             }
         }
 
-        return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
+        returnRepository.save(ret);
+
+        // 접수 판정: 정상 상품만 국내온라인반품 창고에 자동 입고
+        List<Map<String,Object>> stockedList = new ArrayList<>();
+        if (req.items != null) {
+            for (Map<String, Object> item : req.items) {
+                String itemResult = (String) item.get("result");
+                if (!"NORMAL".equals(itemResult)) continue; // 불량은 접수 시 입고 안 함
+
+                String productCode = (String) item.get("productCode");
+                if (productCode == null || productCode.isBlank()) continue;
+
+                int qty = item.get("quantity") instanceof Number
+                    ? ((Number) item.get("quantity")).intValue() : 1;
+
+                try {
+                    List<Product> found = productRepository.searchProducts(productCode);
+                    Product product = found.stream()
+                        .filter(p -> productCode.equalsIgnoreCase(p.getSku())
+                                  || productCode.equalsIgnoreCase(p.getBarcode()))
+                        .findFirst().orElse(found.isEmpty() ? null : found.get(0));
+
+                    if (product == null) {
+                        log.warn("접수 상품 미매칭: productCode={}", productCode);
+                        continue;
+                    }
+
+                    String wh = req.receiveWarehouseCode != null
+                        ? req.receiveWarehouseCode : "ANYANG_RETURN_ONLINE";
+                    String notes = "반품 접수 입고 [정상] (" + ret.getOrderNo() + ")";
+                    inventoryService.processInboundWithWarehouse(
+                        product.getProductId(), qty, wh, null, notes
+                    );
+
+                    Map<String,Object> record = new LinkedHashMap<>();
+                    record.put("productId",    product.getProductId().toString());
+                    record.put("productName",  product.getProductName());
+                    record.put("sku",          product.getSku());
+                    record.put("quantity",     qty);
+                    record.put("warehouseCode", wh);
+                    record.put("itemResult",   "NORMAL");
+                    stockedList.add(record);
+                    log.info("접수 입고: {} {}개 → {}", product.getSku(), qty, wh);
+                } catch (Exception e) {
+                    log.warn("접수 재고 입고 실패 (productCode={}): {}", productCode, e.getMessage());
+                }
+            }
+        }
+
+        // 입고 내역 저장 (취소 시 롤백용)
+        if (!stockedList.isEmpty()) {
+            try {
+                ret.setStockedItems(mapper.writeValueAsString(stockedList));
+                returnRepository.save(ret);
+            } catch (Exception e) {
+                log.warn("stockedItems 저장 실패: {}", e.getMessage());
+            }
+        }
+
+        return ResponseEntity.ok(new ReturnDTO(ret));
     }
 
     /* ── 반품 목록 ────────────────────────────────────── */

@@ -67,6 +67,16 @@ public class ProductReturn {
     @Builder.Default
     private ReturnStatus status = ReturnStatus.REQUESTED;
 
+    /* ── 접수 판정 (접수 단계) ─────────────────────── */
+    @Column(name = "receive_result", length = 20)
+    private String receiveResult;           // NORMAL | DEFECTIVE (접수 시 전체 판정)
+
+    @Column(name = "receive_warehouse_code", length = 50)
+    private String receiveWarehouseCode;    // 접수 창고 코드 (정상→ANYANG_RETURN_ONLINE, 불량→RETURN_POOR)
+
+    @Column(name = "receive_memo", columnDefinition = "TEXT")
+    private String receiveMemo;             // 접수 작업메모
+
     /* ── 검수 결과 ─────────────────────────────────── */
     @Enumerated(EnumType.STRING)
     @Column(name = "inspect_result", length = 20)
