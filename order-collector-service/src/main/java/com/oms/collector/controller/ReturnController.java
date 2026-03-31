@@ -1,5 +1,6 @@
 package com.oms.collector.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oms.collector.entity.Product;
 import com.oms.collector.entity.Return;
 import com.oms.collector.repository.ReturnRepository;
@@ -36,6 +37,7 @@ public class ReturnController {
     private final ReturnRepository  returnRepository;
     private final InventoryService  inventoryService;
     private final ProductRepository productRepository;
+    private final ObjectMapper      objectMapper;
 
     /* ── DTO ─────────────────────────────────────────── */
 
@@ -53,6 +55,7 @@ public class ReturnController {
         public String receiveResult;        // NORMAL | DEFECTIVE (접수 시 판정)
         public String receiveWarehouseCode; // 접수 창고 코드
         public String receiveMemo;          // 접수 작업메모
+        public Object items;               // 상품별 판정 [{productName, quantity, result, ...}]
     }
 
     public static class InspectRequest {
@@ -86,6 +89,7 @@ public class ReturnController {
         public String  receiveResult;
         public String  receiveWarehouseCode;
         public String  receiveMemo;
+        public String  receiveItems;
         public String  inspectResult;
         public String  warehouseCode;
         public String  inspectMemo;
@@ -111,9 +115,10 @@ public class ReturnController {
             this.returnTrackingNo   = r.getReturnTrackingNo();
             this.carrierName        = r.getCarrierName();
             this.status             = r.getStatus()          != null ? r.getStatus().name()          : null;
-            this.receiveResult      = r.getReceiveResult();
+            this.receiveResult        = r.getReceiveResult();
             this.receiveWarehouseCode = r.getReceiveWarehouseCode();
-            this.receiveMemo        = r.getReceiveMemo();
+            this.receiveMemo          = r.getReceiveMemo();
+            this.receiveItems         = r.getReceiveItems();
             this.inspectResult      = r.getInspectResult()   != null ? r.getInspectResult().name()   : null;
             this.warehouseCode      = r.getWarehouseCode();
             this.inspectMemo        = r.getInspectMemo();
@@ -149,6 +154,7 @@ public class ReturnController {
             .receiveResult(req.receiveResult)
             .receiveWarehouseCode(req.receiveWarehouseCode)
             .receiveMemo(req.receiveMemo)
+            .receiveItems(serializeItems(req.items))
             .status(Return.ReturnStatus.REQUESTED)
             .source("MANUAL")
             .build();
@@ -288,6 +294,16 @@ public class ReturnController {
             .orElseThrow(() -> new RuntimeException("반품을 찾을 수 없습니다: " + id));
         ret.setStatus(Return.ReturnStatus.CANCELLED);
         return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
+    }
+
+    /* ── 통계 ─────────────────────────────────────────── */
+
+    /* ── 유틸 ─────────────────────────────────────────── */
+
+    private String serializeItems(Object items) {
+        if (items == null) return null;
+        try { return objectMapper.writeValueAsString(items); }
+        catch (Exception e) { return null; }
     }
 
     /* ── 통계 ─────────────────────────────────────────── */
