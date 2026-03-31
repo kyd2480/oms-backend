@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -102,6 +103,32 @@ public class InventoryService {
             transaction.getBeforeStock(), transaction.getAfterStock());
 
         return saved;
+    }
+
+    /**
+     * 접수 시 창고 입고 (REQUIRES_NEW) — 실패해도 외부 트랜잭션에 영향 없음
+     * 창고 미존재, 상품 미매칭 등 예외를 조용히 처리
+     */
+    /**
+     * 접수 시 창고 입고 (REQUIRES_NEW) — 독립 트랜잭션으로 실행
+     * 실패 시 예외를 던져 호출자가 접수 전체를 중단할 수 있도록 함
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void tryAcceptanceInbound(UUID productId, int quantity,
+                                     String warehouseCode, String notes) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+            .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 창고: " + warehouseCode));
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다: " + productId));
+        updateWarehouseStock(product.getProductId(), warehouse.getCode(),
+            warehouse.getName(), quantity);
+        String detailedNotes = String.format("창고:%s(%s) | %s",
+            warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
+        InventoryTransaction tx = InventoryTransaction.createInbound(
+            product, quantity, warehouse.getName(), detailedNotes);
+        transactionRepository.save(tx);
+        productRepository.save(product);
+        log.info("✅ 접수 입고: {} {}개 → {}", product.getProductName(), quantity, warehouse.getName());
     }
 
     /**

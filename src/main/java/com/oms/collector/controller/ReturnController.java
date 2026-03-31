@@ -211,36 +211,24 @@ public class ReturnController {
                 int qty = item.get("quantity") instanceof Number
                     ? ((Number) item.get("quantity")).intValue() : 1;
 
-                try {
-                    List<Product> found = productRepository.searchProducts(productCode);
-                    Product product = found.stream()
-                        .filter(p -> productCode.equalsIgnoreCase(p.getSku())
-                                  || productCode.equalsIgnoreCase(p.getBarcode()))
-                        .findFirst().orElse(found.isEmpty() ? null : found.get(0));
+                List<Product> found = productRepository.searchProducts(productCode);
+                Product product = found.stream()
+                    .filter(p -> productCode.equalsIgnoreCase(p.getSku())
+                              || productCode.equalsIgnoreCase(p.getBarcode()))
+                    .findFirst().orElse(found.isEmpty() ? null : found.get(0));
 
-                    if (product == null) {
-                        log.warn("접수 상품 미매칭: productCode={}", productCode);
-                        continue;
-                    }
-
-                    if (isNormal) {
-                        // 정상: 국내온라인반품 창고 재고만 기록 (총재고 불변)
-                        inventoryService.processDefectiveInbound(
-                            product.getProductId(), qty, "ANYANG_RETURN_ONLINE",
-                            "반품 접수 입고 [정상] (" + ret.getOrderNo() + ")"
-                        );
-                        log.info("접수 입고 [정상]: {} {}개 → ANYANG_RETURN_ONLINE", product.getSku(), qty);
-                    } else {
-                        // 불량: 반품불량 창고 재고만 기록 (총재고 불변)
-                        inventoryService.processDefectiveInbound(
-                            product.getProductId(), qty, "RETURN_POOR",
-                            "반품 접수 입고 [불량] (" + ret.getOrderNo() + ")"
-                        );
-                        log.info("접수 입고 [불량]: {} {}개 → RETURN_POOR", product.getSku(), qty);
-                    }
-                } catch (Exception e) {
-                    log.warn("접수 재고 입고 실패 (productCode={}): {}", productCode, e.getMessage());
+                if (product == null) {
+                    throw new IllegalArgumentException(
+                        "상품을 찾을 수 없습니다: [" + productCode + "]\n"
+                        + "재고 관리에서 바코드 또는 SKU를 확인해주세요.");
                 }
+
+                String wh = isNormal ? "ANYANG_RETURN_ONLINE" : "RETURN_POOR";
+                // REQUIRES_NEW — 실패 시 예외 전파, 접수 전체 롤백
+                inventoryService.tryAcceptanceInbound(
+                    product.getProductId(), qty, wh,
+                    "반품 접수 입고 [" + (isNormal ? "정상" : "불량") + "] (" + ret.getOrderNo() + ")"
+                );
             }
         }
 
