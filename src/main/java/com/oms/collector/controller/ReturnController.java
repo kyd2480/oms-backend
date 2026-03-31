@@ -197,12 +197,13 @@ public class ReturnController {
 
         returnRepository.save(ret);
 
-        // 접수 판정: 정상 상품만 국내온라인반품 창고에 자동 입고
-        List<Map<String,Object>> stockedList = new ArrayList<>();
+        // 접수 판정: 정상 → 국내온라인반품 창고 기록, 불량 → 반품불량 창고 기록 (모두 총재고 불변)
         if (req.items != null) {
             for (Map<String, Object> item : req.items) {
                 String itemResult = (String) item.get("result");
-                if (!"NORMAL".equals(itemResult)) continue; // 불량은 접수 시 입고 안 함
+                boolean isNormal    = "NORMAL".equals(itemResult);
+                boolean isDefective = "DEFECTIVE".equals(itemResult);
+                if (!isNormal && !isDefective) continue;
 
                 String productCode = (String) item.get("productCode");
                 if (productCode == null || productCode.isBlank()) continue;
@@ -222,35 +223,24 @@ public class ReturnController {
                         continue;
                     }
 
-                    String wh = req.receiveWarehouseCode != null
-                        ? req.receiveWarehouseCode : "ANYANG_RETURN_ONLINE";
-                    String notes = "반품 접수 입고 [정상] (" + ret.getOrderNo() + ")";
-                    inventoryService.processInboundWithWarehouse(
-                        product.getProductId(), qty, wh, null, notes
-                    );
-
-                    Map<String,Object> record = new LinkedHashMap<>();
-                    record.put("productId",    product.getProductId().toString());
-                    record.put("productName",  product.getProductName());
-                    record.put("sku",          product.getSku());
-                    record.put("quantity",     qty);
-                    record.put("warehouseCode", wh);
-                    record.put("itemResult",   "NORMAL");
-                    stockedList.add(record);
-                    log.info("접수 입고: {} {}개 → {}", product.getSku(), qty, wh);
+                    if (isNormal) {
+                        // 정상: 국내온라인반품 창고 재고만 기록 (총재고 불변)
+                        inventoryService.processDefectiveInbound(
+                            product.getProductId(), qty, "ANYANG_RETURN_ONLINE",
+                            "반품 접수 입고 [정상] (" + ret.getOrderNo() + ")"
+                        );
+                        log.info("접수 입고 [정상]: {} {}개 → ANYANG_RETURN_ONLINE", product.getSku(), qty);
+                    } else {
+                        // 불량: 반품불량 창고 재고만 기록 (총재고 불변)
+                        inventoryService.processDefectiveInbound(
+                            product.getProductId(), qty, "RETURN_POOR",
+                            "반품 접수 입고 [불량] (" + ret.getOrderNo() + ")"
+                        );
+                        log.info("접수 입고 [불량]: {} {}개 → RETURN_POOR", product.getSku(), qty);
+                    }
                 } catch (Exception e) {
                     log.warn("접수 재고 입고 실패 (productCode={}): {}", productCode, e.getMessage());
                 }
-            }
-        }
-
-        // 입고 내역 저장 (취소 시 롤백용)
-        if (!stockedList.isEmpty()) {
-            try {
-                ret.setStockedItems(mapper.writeValueAsString(stockedList));
-                returnRepository.save(ret);
-            } catch (Exception e) {
-                log.warn("stockedItems 저장 실패: {}", e.getMessage());
             }
         }
 
