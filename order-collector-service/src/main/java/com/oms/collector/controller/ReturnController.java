@@ -50,6 +50,9 @@ public class ReturnController {
         public String returnReason;
         public String returnTrackingNo;
         public String carrierName;
+        public String receiveResult;        // NORMAL | DEFECTIVE (접수 시 판정)
+        public String receiveWarehouseCode; // 접수 창고 코드
+        public String receiveMemo;          // 접수 작업메모
     }
 
     public static class InspectRequest {
@@ -80,6 +83,9 @@ public class ReturnController {
         public String  returnTrackingNo;
         public String  carrierName;
         public String  status;
+        public String  receiveResult;
+        public String  receiveWarehouseCode;
+        public String  receiveMemo;
         public String  inspectResult;
         public String  warehouseCode;
         public String  inspectMemo;
@@ -93,29 +99,32 @@ public class ReturnController {
         public String  completedAt;
 
         public ReturnDTO(Return r) {
-            this.returnId        = r.getReturnId().toString();
-            this.orderNo         = r.getOrderNo();
-            this.channelName     = r.getChannelName();
-            this.recipientName   = r.getRecipientName();
-            this.recipientPhone  = r.getRecipientPhone();
-            this.productName     = r.getProductName();
-            this.quantity        = r.getQuantity();
-            this.returnType      = r.getReturnType()      != null ? r.getReturnType().name()      : null;
-            this.returnReason    = r.getReturnReason();
-            this.returnTrackingNo= r.getReturnTrackingNo();
-            this.carrierName     = r.getCarrierName();
-            this.status          = r.getStatus()          != null ? r.getStatus().name()          : null;
-            this.inspectResult   = r.getInspectResult()   != null ? r.getInspectResult().name()   : null;
-            this.warehouseCode   = r.getWarehouseCode();
-            this.inspectMemo     = r.getInspectMemo();
-            this.resolutionType  = r.getResolutionType()  != null ? r.getResolutionType().name()  : null;
-            this.refundAmount    = r.getRefundAmount();
-            this.exchangeOrderNo = r.getExchangeOrderNo();
-            this.resolutionMemo  = r.getResolutionMemo();
-            this.source          = r.getSource();
-            this.createdAt       = r.getCreatedAt()   != null ? r.getCreatedAt().toString()   : null;
-            this.updatedAt       = r.getUpdatedAt()   != null ? r.getUpdatedAt().toString()   : null;
-            this.completedAt     = r.getCompletedAt() != null ? r.getCompletedAt().toString() : null;
+            this.returnId           = r.getReturnId().toString();
+            this.orderNo            = r.getOrderNo();
+            this.channelName        = r.getChannelName();
+            this.recipientName      = r.getRecipientName();
+            this.recipientPhone     = r.getRecipientPhone();
+            this.productName        = r.getProductName();
+            this.quantity           = r.getQuantity();
+            this.returnType         = r.getReturnType()      != null ? r.getReturnType().name()      : null;
+            this.returnReason       = r.getReturnReason();
+            this.returnTrackingNo   = r.getReturnTrackingNo();
+            this.carrierName        = r.getCarrierName();
+            this.status             = r.getStatus()          != null ? r.getStatus().name()          : null;
+            this.receiveResult      = r.getReceiveResult();
+            this.receiveWarehouseCode = r.getReceiveWarehouseCode();
+            this.receiveMemo        = r.getReceiveMemo();
+            this.inspectResult      = r.getInspectResult()   != null ? r.getInspectResult().name()   : null;
+            this.warehouseCode      = r.getWarehouseCode();
+            this.inspectMemo        = r.getInspectMemo();
+            this.resolutionType     = r.getResolutionType()  != null ? r.getResolutionType().name()  : null;
+            this.refundAmount       = r.getRefundAmount();
+            this.exchangeOrderNo    = r.getExchangeOrderNo();
+            this.resolutionMemo     = r.getResolutionMemo();
+            this.source             = r.getSource();
+            this.createdAt          = r.getCreatedAt()   != null ? r.getCreatedAt().toString()   : null;
+            this.updatedAt          = r.getUpdatedAt()   != null ? r.getUpdatedAt().toString()   : null;
+            this.completedAt        = r.getCompletedAt() != null ? r.getCompletedAt().toString() : null;
         }
     }
 
@@ -137,6 +146,9 @@ public class ReturnController {
             .returnReason(req.returnReason)
             .returnTrackingNo(req.returnTrackingNo)
             .carrierName(req.carrierName)
+            .receiveResult(req.receiveResult)
+            .receiveWarehouseCode(req.receiveWarehouseCode)
+            .receiveMemo(req.receiveMemo)
             .status(Return.ReturnStatus.REQUESTED)
             .source("MANUAL")
             .build();
