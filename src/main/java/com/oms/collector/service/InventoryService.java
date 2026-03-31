@@ -86,15 +86,15 @@ public class InventoryService {
                 log.debug("신규 창고 입고 (warehouse_stock 테이블): {} {}", warehouse.getCode(), quantity);
         }
 
-        // 총 재고 증가
-        product.increaseStock(quantity);
-
-        // 거래 내역 기록
+        // 거래 내역 기록 (총재고 변경 전에 생성해야 beforeStock이 정확함)
         String detailedNotes = String.format("창고:%s(%s) | %s",
             warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
         InventoryTransaction transaction = InventoryTransaction.createInbound(
             product, quantity, location != null ? location : warehouse.getName(), detailedNotes);
         transactionRepository.save(transaction);
+
+        // 총 재고 증가
+        product.increaseStock(quantity);
 
         Product saved = productRepository.save(product);
 
@@ -120,8 +120,16 @@ public class InventoryService {
             warehouse.getName(), quantity);
         String detailedNotes = String.format("창고:%s(%s) | %s",
             warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
-        InventoryTransaction tx = InventoryTransaction.createInbound(
-            product, quantity, warehouse.getName(), detailedNotes);
+        // 접수 입고는 총재고 변경 없음 → beforeStock = afterStock = totalStock
+        InventoryTransaction tx = InventoryTransaction.builder()
+            .product(product)
+            .transactionType("IN")
+            .quantity(quantity)
+            .beforeStock(product.getTotalStock())
+            .afterStock(product.getTotalStock())
+            .toLocation(warehouse.getName())
+            .notes(detailedNotes)
+            .build();
         transactionRepository.save(tx);
         productRepository.save(product);
         log.info("✅ 접수 입고: {} {}개 → {}", product.getProductName(), quantity, warehouse.getName());
@@ -146,27 +154,59 @@ public class InventoryService {
         Warehouse toWh = warehouseRepository.findByCode(toWarehouseCode)
             .orElseThrow(() -> new IllegalArgumentException("도착 창고 없음: " + toWarehouseCode));
 
-        // 출발 창고 재고 차감
-        updateWarehouseStock(product.getProductId(), fromWh.getCode(), fromWh.getName(), -quantity);
+        // 출발 창고 재고 차감 (레거시 컬럼 vs warehouse_stock 테이블 구분)
+        applyWarehouseStockDelta(product, fromWh.getCode(), fromWh.getName(), -quantity);
 
-        // 도착 창고 재고 증가
-        updateWarehouseStock(product.getProductId(), toWh.getCode(), toWh.getName(), quantity);
+        // 도착 창고 재고 증가 (레거시 컬럼 vs warehouse_stock 테이블 구분)
+        applyWarehouseStockDelta(product, toWh.getCode(), toWh.getName(), quantity);
+
+        // 거래 내역 기록 (총재고 변경 전에 생성해야 beforeStock이 정확함)
+        String detailedNotes = String.format("창고이동:%s→%s | %s",
+            fromWh.getName(), toWh.getName(), notes != null ? notes : "");
+        int beforeTotal = product.getTotalStock();
+        InventoryTransaction tx = InventoryTransaction.builder()
+            .product(product)
+            .transactionType(normalTransfer ? "IN" : "MOVE")
+            .quantity(quantity)
+            .beforeStock(beforeTotal)
+            .afterStock(normalTransfer ? beforeTotal + quantity : beforeTotal)
+            .fromLocation(fromWh.getName())
+            .toLocation(toWh.getName())
+            .notes(detailedNotes)
+            .build();
+        transactionRepository.save(tx);
 
         // 정상 검수 이동: 총재고/가용재고 증가 (ANYANG_KO_RETURN은 총재고 미반영이었으므로 여기서 반영)
         if (normalTransfer) {
             product.increaseStock(quantity);
-            productRepository.save(product);
         }
 
-        // 거래 내역 기록
-        String detailedNotes = String.format("창고이동:%s→%s | %s",
-            fromWh.getName(), toWh.getName(), notes != null ? notes : "");
-        InventoryTransaction tx = InventoryTransaction.createInbound(
-            product, quantity, toWh.getName(), detailedNotes);
-        transactionRepository.save(tx);
+        productRepository.save(product);
 
         log.info("✅ 창고 이동 완료: {} {}개 {} → {}", product.getProductName(), quantity,
             fromWh.getName(), toWh.getName());
+    }
+
+    /**
+     * 레거시 창고(ANYANG/ICHEON_BOX/ICHEON_PCS/BUCHEON)는 Product 컬럼 직접 수정,
+     * 그 외 신규 창고는 product_warehouse_stock 테이블 사용
+     */
+    private void applyWarehouseStockDelta(Product product, String warehouseCode,
+                                          String warehouseName, int delta) {
+        switch (warehouseCode) {
+            case "ANYANG":
+                product.setWarehouseStockAnyang(product.getWarehouseStockAnyang() + delta);
+                break;
+            case "ICHEON_BOX":
+            case "ICHEON_PCS":
+                product.setWarehouseStockIcheon(product.getWarehouseStockIcheon() + delta);
+                break;
+            case "BUCHEON":
+                product.setWarehouseStockBucheon(product.getWarehouseStockBucheon() + delta);
+                break;
+            default:
+                updateWarehouseStock(product.getProductId(), warehouseCode, warehouseName, delta);
+        }
     }
 
     /**
@@ -246,15 +286,15 @@ public class InventoryService {
                 log.debug("신규 창고 출고 (warehouse_stock 테이블): {} -{}", warehouse.getCode(), quantity);
         }
 
-        // 총 재고 차감
-        product.decreaseStock(quantity);
-
-        // 거래 내역 기록
+        // 거래 내역 기록 (총재고 변경 전에 생성해야 beforeStock이 정확함)
         String detailedNotes = String.format("창고:%s(%s) | %s",
             warehouse.getName(), warehouse.getCode(), notes != null ? notes : "");
         InventoryTransaction transaction = InventoryTransaction.createOutbound(
             product, quantity, orderId, detailedNotes);
         transactionRepository.save(transaction);
+
+        // 총 재고 차감
+        product.decreaseStock(quantity);
 
         Product saved = productRepository.save(product);
 
@@ -277,11 +317,11 @@ public class InventoryService {
         Product product = productRepository.findById(productId)
             .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
-        product.increaseStock(quantity);
-
         InventoryTransaction transaction = InventoryTransaction.createInbound(
             product, quantity, location, notes);
         transactionRepository.save(transaction);
+
+        product.increaseStock(quantity);
 
         Product saved = productRepository.save(product);
 
@@ -301,11 +341,11 @@ public class InventoryService {
         Product product = productRepository.findById(productId)
             .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
 
-        product.decreaseStock(quantity);
-
         InventoryTransaction transaction = InventoryTransaction.createOutbound(
             product, quantity, orderId, notes);
         transactionRepository.save(transaction);
+
+        product.decreaseStock(quantity);
 
         Product saved = productRepository.save(product);
 
@@ -463,16 +503,26 @@ public class InventoryService {
                 warehouseStockRepository.save(ws);
         }
 
-        // 총재고 차감 (0 이하 방지)
+        // 거래 내역 기록 (총재고 변경 전에 생성해야 beforeStock이 정확함)
         int newTotal = Math.max(0, product.getTotalStock() - quantity);
         int newAvail = Math.max(0, product.getAvailableStock() - quantity);
+        String detailedNotes = String.format("창고:%s(%s) | %s", warehouseName, warehouseCode, notes);
+        InventoryTransaction transaction = InventoryTransaction.builder()
+            .product(product)
+            .transactionType("OUT")
+            .quantity(quantity)
+            .beforeStock(product.getTotalStock())
+            .afterStock(newTotal)
+            .fromLocation(warehouseName)
+            .referenceType("RETURN_CANCEL")
+            .notes(detailedNotes)
+            .build();
+        transactionRepository.save(transaction);
+
+        // 총재고 차감 (0 이하 방지)
         product.setTotalStock(newTotal);
         product.setAvailableStock(newAvail);
 
-        String detailedNotes = String.format("창고:%s(%s) | %s", warehouseName, warehouseCode, notes);
-        InventoryTransaction transaction = InventoryTransaction.createOutbound(
-            product, quantity, null, detailedNotes);
-        transactionRepository.save(transaction);
         productRepository.save(product);
         log.info("✅ 강제 출고 완료 (반품 취소): {} - 창고:{}", product.getProductName(), warehouseName);
     }
