@@ -213,6 +213,35 @@ public class InventoryController {
         return ResponseEntity.ok(transactions.stream().map(this::toTransactionDto).collect(Collectors.toList()));
     }
 
+    /**
+     * 재고 동기화: 레거시 창고 컬럼 기준으로 totalStock/availableStock 재계산
+     * product_warehouse_stock 테이블의 레거시 창고(ANYANG/ICHEON_BOX/ICHEON_PCS/BUCHEON) 항목은 삭제 후 정리
+     */
+    @PostMapping("/products/{id}/sync-stock")
+    public ResponseEntity<?> syncStock(@PathVariable UUID id) {
+        log.info("🔄 재고 동기화 요청: {}", id);
+        return productRepository.findById(id).map(product -> {
+            // 1. product_warehouse_stock 테이블에서 레거시 창고 항목 제거 (중복 방지)
+            for (String legacyCode : new String[]{"ANYANG", "ICHEON_BOX", "ICHEON_PCS", "BUCHEON"}) {
+                inventoryService.deleteWarehouseStockIfExists(product.getProductId(), legacyCode);
+            }
+
+            // 2. 레거시 컬럼 합산 = 정상 창고 재고
+            int legacySum = (product.getWarehouseStockAnyang()  != null ? product.getWarehouseStockAnyang()  : 0)
+                          + (product.getWarehouseStockIcheon()  != null ? product.getWarehouseStockIcheon()  : 0)
+                          + (product.getWarehouseStockBucheon() != null ? product.getWarehouseStockBucheon() : 0);
+
+            // 3. totalStock / availableStock 재설정 (reservedStock 유지)
+            int reserved = product.getReservedStock() != null ? product.getReservedStock() : 0;
+            product.setTotalStock(legacySum);
+            product.setAvailableStock(Math.max(0, legacySum - reserved));
+            productRepository.save(product);
+
+            log.info("✅ 재고 동기화 완료: {} → totalStock={}", product.getProductName(), legacySum);
+            return ResponseEntity.ok(toProductDto(product));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/stats")
     public ResponseEntity<InventoryDto.StatsResponse> getInventoryStats() {
         List<Product> allProducts  = productRepository.findByIsActiveTrueOrderByProductNameAsc();

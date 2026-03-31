@@ -534,4 +534,16 @@ public class InventoryService {
     public List<ProductWarehouseStock> getWarehouseStocks(UUID productId) {
         return warehouseStockRepository.findByProductId(productId);
     }
+
+    /**
+     * product_warehouse_stock 테이블에서 레거시 창고 항목 삭제 (동기화용)
+     */
+    @Transactional
+    public void deleteWarehouseStockIfExists(UUID productId, String warehouseCode) {
+        warehouseStockRepository.findByProductIdAndWarehouseCode(productId, warehouseCode)
+            .ifPresent(ws -> {
+                warehouseStockRepository.delete(ws);
+                log.info("🗑️ 레거시 창고 중복 항목 삭제: {} ({})", warehouseCode, productId);
+            });
+    }
 }
