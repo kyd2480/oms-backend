@@ -89,15 +89,29 @@ public class AllocationController {
     /**
      * 검수발송 시 실제 재고 차감
      * POST /api/allocation/confirm/{orderNo}
+     * Body(optional): { "warehouseCode": "ANYANG", "warehouseName": "본사(안양)" }
      */
     @PostMapping("/confirm/{orderNo}")
     @Transactional
-    public ResponseEntity<Map<String, Object>> confirmAndDeduct(@PathVariable String orderNo) {
-        if (selectedWarehouseCode == null) {
+    public ResponseEntity<Map<String, Object>> confirmAndDeduct(
+            @PathVariable String orderNo,
+            @RequestBody(required = false) Map<String, String> body) {
+
+        // 요청 body에 창고 코드가 있으면 우선 사용, 없으면 static 변수 사용
+        String warehouseCode = (body != null && body.get("warehouseCode") != null && !body.get("warehouseCode").isBlank())
+            ? body.get("warehouseCode") : selectedWarehouseCode;
+        String warehouseName = (body != null && body.get("warehouseName") != null && !body.get("warehouseName").isBlank())
+            ? body.get("warehouseName") : selectedWarehouseName;
+
+        if (warehouseCode == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "할당 창고가 설정되지 않았습니다"));
         }
 
-        log.info("재고 실차감 (검수발송): {} / 창고: {}", orderNo, selectedWarehouseCode);
+        // static 변수도 최신 값으로 업데이트
+        selectedWarehouseCode = warehouseCode;
+        if (warehouseName != null) selectedWarehouseName = warehouseName;
+
+        log.info("재고 실차감 (검수발송): {} / 창고: {}", orderNo, warehouseCode);
 
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
@@ -109,10 +123,8 @@ public class AllocationController {
             if (product == null) continue;
             int qty = item.getQuantity() != null ? item.getQuantity() : 0;
             try {
-                // confirmReservedStock: totalStock-qty, reservedStock-qty
-                // (재고매칭에서 reserveStock으로 예약했으므로 확정 시 예약→출고 처리)
                 inventoryService.processOutboundWithWarehouse(
-                    product.getProductId(), qty, selectedWarehouseCode,
+                    product.getProductId(), qty, warehouseCode,
                     order.getOrderId(), "검수발송 출고: " + orderNo
                 );
                 // 예약 재고 해제 (reservedStock 복구)
