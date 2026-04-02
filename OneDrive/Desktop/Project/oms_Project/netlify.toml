@@ -1,0 +1,15 @@
+[build]
+  base    = "public"
+  command = "npm install && npm run build"
+  publish = "public/dist"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[functions]
+  directory = "public/netlify/functions"
+
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
