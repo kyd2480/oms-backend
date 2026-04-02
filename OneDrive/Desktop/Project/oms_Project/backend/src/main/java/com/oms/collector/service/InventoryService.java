@@ -237,7 +237,7 @@ public class InventoryService {
 
         log.info("✅ 불량 입고 완료: {} - 창고:{}", product.getProductName(), warehouse.getName());
     }
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Product processOutboundWithWarehouse(UUID productId, int quantity,
                                                 String warehouseCode, UUID orderId, String notes) {
         log.info("📤 출고 처리 (창고별): 상품 ID={}, 수량={}, 창고={}", productId, quantity, warehouseCode);
