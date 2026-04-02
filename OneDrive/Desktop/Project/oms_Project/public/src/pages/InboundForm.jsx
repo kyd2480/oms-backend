@@ -1,33 +1,39 @@
 import { useState, useEffect } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL?.replace('/api/processing', '/api/inventory') || 
+const API_BASE = import.meta.env.VITE_API_URL?.replace('/api/processing', '/api/inventory') ||
                  'https://oms-backend-production-8a38.up.railway.app/api/inventory';
+const API_WH = import.meta.env.VITE_API_URL?.replace('/api/processing', '/api/warehouses') ||
+               'https://oms-backend-production-8a38.up.railway.app/api/warehouses';
+const API_WH_STOCK = import.meta.env.VITE_API_URL?.replace('/api/processing', '/api/warehouse-stocks') ||
+                     'https://oms-backend-production-8a38.up.railway.app/api/warehouse-stocks';
 
 export default function InboundForm() {
   const [products, setProducts] = useState([]);
-  
+  const [warehouses, setWarehouses] = useState([]);
+
   const [formData, setFormData] = useState({
     barcode: '',
     inboundDate: new Date().toISOString().split('T')[0],
     workType: '교환',
-    warehouse: '1.본사(안양)',
+    warehouseCode: '',
     workMemo: '',
     processStatus: '미지정',
     optionSearch: '',
     location: '',
     quantity: ''
   });
-  
+
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [warehouseStocks, setWarehouseStocks] = useState({});
   const [barcodeError, setBarcodeError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const workTypes = ['교환', '반품', '원물공업입', '구매입고', 'M to M', '재고조정', '정산', '이동'];
-  const warehouses = ['1.본사(안양)', '2.고백창고(이천)', '3.부천검수창고'];
   const processStatuses = ['미지정', '처리완료', '처리중'];
 
   useEffect(() => {
     loadProducts();
+    loadWarehouses();
   }, []);
 
   const loadProducts = async () => {
@@ -40,69 +46,82 @@ export default function InboundForm() {
     }
   };
 
+  const loadWarehouses = async () => {
+    try {
+      const res = await fetch(`${API_WH}/active`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : [];
+        setWarehouses(list);
+        if (list.length > 0) {
+          setFormData(f => ({ ...f, warehouseCode: list[0].code || list[0].warehouseCode || '' }));
+        }
+      }
+    } catch (e) {
+      console.error('창고 로드 실패:', e);
+    }
+  };
+
+  const getWarehouseName = (code) => {
+    const wh = warehouses.find(w => (w.code || w.warehouseCode) === code);
+    return wh ? (wh.name || wh.warehouseName) : code;
+  };
+
+  const getWarehouseStock = (code = formData.warehouseCode) => {
+    if (!code) return 0;
+    return warehouseStocks[code] ?? 0;
+  };
+
   const handleBarcodeInput = (e) => {
     const value = e.target.value;
     setFormData({ ...formData, barcode: value });
-    
-    // 바코드 스캐너 자동 검색 (10자 이상)
     if (value.length >= 10) {
-      setTimeout(() => {
-        handleBarcodeSearch();
-      }, 100);
+      setTimeout(() => handleBarcodeSearch(), 100);
     }
   };
 
   const handleBarcodeSearch = async () => {
     setBarcodeError('');
     setSelectedProduct(null);
-
     if (!formData.barcode.trim()) return;
 
     const searchTerm = formData.barcode.toLowerCase().trim();
-    
-    const product = products.find(p => 
-      p.barcode?.toLowerCase().includes(searchTerm) || 
+    const product = products.find(p =>
+      p.barcode?.toLowerCase().includes(searchTerm) ||
       p.sku?.toLowerCase().includes(searchTerm) ||
       p.productName?.toLowerCase().includes(searchTerm)
     );
-    
+
     if (product) {
       setSelectedProduct(product);
+      try {
+        const res = await fetch(`${API_WH_STOCK}/${product.productId}`);
+        if (res.ok) {
+          const stocks = await res.json();
+          const map = {};
+          stocks.forEach(s => { map[s.warehouseCode] = s.stock; });
+          // 레거시 창고는 Product 엔티티 컬럼이 정본 — 항상 덮어씀
+          map['ANYANG']     = product.warehouseStockAnyang  || 0;
+          map['ICHEON_BOX'] = product.warehouseStockIcheon  || 0;
+          map['ICHEON_PCS'] = product.warehouseStockIcheon  || 0;
+          map['BUCHEON']    = product.warehouseStockBucheon || 0;
+          setWarehouseStocks(map);
+        }
+      } catch (e) {
+        console.error('창고 재고 조회 실패:', e);
+      }
     } else {
       setBarcodeError('⚠️ 해당 바코드의 상품을 찾을 수 없습니다.');
     }
   };
 
-  const getWarehouseStock = () => {
-    if (!selectedProduct) return 0;
-    
-    switch (formData.warehouse) {
-      case '1.본사(안양)':
-        return selectedProduct.warehouseStockAnyang || 0;
-      case '2.고백창고(이천)':
-        return selectedProduct.warehouseStockIcheon || 0;
-      case '3.부천검수창고':
-        return selectedProduct.warehouseStockBucheon || 0;
-      default:
-        return 0;
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!selectedProduct) {
-      alert('상품을 검색해주세요.');
-      return;
-    }
-
-    if (!formData.quantity || formData.quantity <= 0) {
-      alert('입고 수량을 입력해주세요.');
-      return;
-    }
+    if (!selectedProduct) { alert('상품을 검색해주세요.'); return; }
+    if (!formData.quantity || formData.quantity <= 0) { alert('입고 수량을 입력해주세요.'); return; }
+    if (!formData.warehouseCode) { alert('창고를 선택해주세요.'); return; }
 
     setLoading(true);
-
     try {
       const response = await fetch(`${API_BASE}/inbound-warehouse`, {
         method: 'POST',
@@ -110,7 +129,7 @@ export default function InboundForm() {
         body: JSON.stringify({
           productId: selectedProduct.productId,
           quantity: parseInt(formData.quantity),
-          warehouse: formData.warehouse,
+          warehouse: formData.warehouseCode,
           location: selectedProduct.warehouseLocation || '',
           notes: `작업명:${formData.workType} | 메모:${formData.workMemo} | 처리:${formData.processStatus}`
         })
@@ -118,22 +137,21 @@ export default function InboundForm() {
 
       if (response.ok) {
         const updatedProduct = await response.json();
-        alert(`✅ 입고 완료!\n\n상품: ${selectedProduct.productName}\n창고: ${formData.warehouse}\n수량: ${formData.quantity}개\n현재 재고: ${updatedProduct.totalStock}개`);
-        
-        setFormData({
+        alert(`✅ 입고 완료!\n\n상품: ${selectedProduct.productName}\n창고: ${getWarehouseName(formData.warehouseCode)}\n수량: ${formData.quantity}개\n현재 재고: ${updatedProduct.totalStock}개`);
+        setFormData(f => ({
           barcode: '', inboundDate: new Date().toISOString().split('T')[0],
-          workType: '교환', warehouse: '1.본사(안양)', workMemo: '',
+          workType: '교환', warehouseCode: f.warehouseCode, workMemo: '',
           processStatus: '미지정', optionSearch: '', location: '', quantity: ''
-        });
+        }));
         setSelectedProduct(null);
         setBarcodeError('');
-        
         await loadProducts();
       } else {
-        alert('❌ 입고 실패');
+        const err = await response.json().catch(() => ({}));
+        alert('❌ 입고 실패: ' + (err.error || response.status));
       }
     } catch (error) {
-      alert('❌ 오류 발생');
+      alert('❌ 오류 발생: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -154,14 +172,14 @@ export default function InboundForm() {
                 <td style={{ padding: '1rem', border: '1px solid #ddd' }}>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <input type="text" value={formData.barcode} onChange={handleBarcodeInput}
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleBarcodeSearch())}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleBarcodeSearch())}
                       placeholder="바코드 스캔 또는 입력" autoFocus style={{ flex: 1, padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.875rem', color: '#333' }} />
                     <button type="button" onClick={handleBarcodeSearch} style={{ padding: '0.5rem 1.5rem', background: '#1976d2', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '600' }}>상품검색</button>
                     <button type="button" onClick={() => { setFormData({ ...formData, barcode: '', location: '', quantity: '' }); setSelectedProduct(null); setBarcodeError(''); }}
                       style={{ padding: '0.5rem 1.5rem', background: '#e0e0e0', color: '#333', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.875rem' }}>초기화</button>
                   </div>
                   {barcodeError && <div style={{ color: '#d32f2f', fontSize: '0.875rem', marginTop: '0.5rem' }}>{barcodeError}</div>}
-                  {selectedProduct && <div style={{ color: '#2e7d32', fontSize: '0.875rem', marginTop: '0.5rem', fontWeight: '600' }}>✓ {selectedProduct.productName}</div>}
+                  {selectedProduct && <div style={{ color: '#2e7d32', fontSize: '0.875rem', marginTop: '0.5rem', fontWeight: '600' }}>✓ {selectedProduct.productName} ({getWarehouseName(formData.warehouseCode)}: {getWarehouseStock()}개)</div>}
                 </td>
               </tr>
 
@@ -175,9 +193,13 @@ export default function InboundForm() {
                       style={{ padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.875rem', color: '#333', minWidth: '120px' }}>
                       {workTypes.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
-                    <select value={formData.warehouse} onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                    <select value={formData.warehouseCode} onChange={(e) => setFormData({ ...formData, warehouseCode: e.target.value })}
                       style={{ padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.875rem', color: '#333', minWidth: '150px' }}>
-                      {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+                      {warehouses.map(w => {
+                        const code = w.code || w.warehouseCode;
+                        const name = w.name || w.warehouseName;
+                        return <option key={code} value={code}>{name}</option>;
+                      })}
                     </select>
                   </div>
                 </td>
@@ -226,7 +248,9 @@ export default function InboundForm() {
                   <td style={{ padding: '0.75rem', border: '1px solid #ddd', fontSize: '0.875rem', color: '#333' }}>{selectedProduct.productName}</td>
                   <td style={{ padding: '0.75rem', border: '1px solid #ddd', textAlign: 'right', fontSize: '0.875rem', color: '#333' }}>{selectedProduct.costPrice?.toLocaleString() || 0}원</td>
                   <td style={{ padding: '0.75rem', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.875rem', color: '#1976d2', fontWeight: '700' }}>{getWarehouseStock()}개</td>
-                  <td style={{ padding: '0.75rem', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.875rem', color: '#333' }}>{selectedProduct.totalStock}개</td>
+                  <td style={{ padding: '0.75rem', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.875rem', color: '#333' }}>
+                    {((selectedProduct.warehouseStockAnyang || 0) + (selectedProduct.warehouseStockIcheon || 0) + (selectedProduct.warehouseStockBucheon || 0) + Object.entries(warehouseStocks).filter(([k]) => !['ANYANG','ICHEON_BOX','ICHEON_PCS','BUCHEON','ANYANG_KO_RETURN','RETURN_POOR'].includes(k)).reduce((s,[,v])=>s+v,0))}개
+                  </td>
                   <td style={{ padding: '0.75rem', border: '1px solid #ddd', textAlign: 'center' }}>
                     <input type="number" value={formData.quantity} onChange={(e) => setFormData({ ...formData, quantity: e.target.value })} min="1" required
                       style={{ width: '80px', padding: '0.25rem', border: '1px solid #ccc', borderRadius: '4px', textAlign: 'center', fontSize: '0.875rem', color: '#333' }} />

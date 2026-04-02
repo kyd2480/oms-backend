@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { addOrders, updateOrder, deleteOrder, clearOrders, subscribeOrders, fetchApiOrders } from '../lib/orderStore';
 
 const API_INV = import.meta.env.VITE_API_URL?.replace('/api/processing', '/api/inventory') ||
                 'https://oms-backend-production-8a38.up.railway.app/api/inventory';
@@ -459,6 +460,208 @@ function TabCsv({ onAdd }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 탭: 자동수집 현황
+// ═══════════════════════════════════════════════════════════════════════════
+// ─── 모듈 레벨 캐시 (탭 전환해도 유지, 새로고침 버튼으로만 갱신) ──
+const _collectCache = {
+  data:      null,   // { orders, totalElements, totalPages, currentPage }
+  page:      0,
+  updatedAt: null,
+  STALE_MS:  5 * 60 * 1000,  // 5분 지나면 자동 재요청
+};
+
+function TabCollect() {
+  const [search,    setSearch]    = useState('');
+  const [chFilter,  setChFilter]  = useState('전체');
+  const [pageData,  setPageData]  = useState(
+    _collectCache.data || { orders:[], totalElements:0, totalPages:1, currentPage:0 }
+  );
+  const [loading,   setLoading]   = useState(!_collectCache.data);
+  const PAGE_SIZE = 50;
+
+  const loadPage = async (p, resetFilter, force = false) => {
+    // 같은 페이지 + 캐시 유효 + 강제 아님 → 스킵
+    if (
+      !force &&
+      _collectCache.data &&
+      _collectCache.page === p &&
+      _collectCache.updatedAt &&
+      Date.now() - _collectCache.updatedAt < _collectCache.STALE_MS
+    ) {
+      setPageData(_collectCache.data);
+      if (resetFilter) { setSearch(''); setChFilter('전체'); }
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await fetchApiOrders({ page: p, size: PAGE_SIZE });
+      _collectCache.data      = data;
+      _collectCache.page      = p;
+      _collectCache.updatedAt = Date.now();
+      setPageData(data);
+      if (resetFilter) { setSearch(''); setChFilter('전체'); }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadPage(_collectCache.page); }, []);
+
+  const orders  = pageData.orders;
+  const channels = ['전체', ...new Set(orders.map(o => o.channel).filter(Boolean))];
+  const filtered = orders.filter(o => {
+    const kw = search.toLowerCase();
+    const matchKw = !kw || [o.orderNo, o.productName, o.receiverName]
+      .some(v => v?.toLowerCase().includes(kw));
+    return matchKw && (chFilter === '전체' || o.channel === chFilter);
+  });
+
+  const { totalElements, totalPages, currentPage } = pageData;
+
+  return (
+    <div>
+      {/* 통계 카드 */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',
+        gap:'1rem', marginBottom:'1.5rem' }}>
+        <div style={{ background:'#fff', padding:'1.25rem', borderRadius:'8px',
+          boxShadow:'0 2px 4px rgba(0,0,0,0.08)', borderTop:'3px solid #1565c0' }}>
+          <div style={{ fontSize:'0.8rem', color:'#666', marginBottom:'0.4rem' }}>전체 수집 주문</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:700, color:'#1565c0' }}>
+            {totalElements.toLocaleString()}
+          </div>
+        </div>
+        <div style={{ background:'#fff', padding:'1.25rem', borderRadius:'8px',
+          boxShadow:'0 2px 4px rgba(0,0,0,0.08)', borderTop:'3px solid #43a047' }}>
+          <div style={{ fontSize:'0.8rem', color:'#666', marginBottom:'0.4rem' }}>현재 페이지</div>
+          <div style={{ fontSize:'1.75rem', fontWeight:700, color:'#43a047' }}>
+            {currentPage + 1} / {totalPages}
+          </div>
+        </div>
+      </div>
+
+      <div style={S.card}>
+        {/* 툴바 */}
+        <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', alignItems:'center', marginBottom:'1rem' }}>
+          <div style={S.sec}><span style={S.dot}/>자동수집 주문 목록</div>
+          <div style={{ flex:1 }}/>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="현재 페이지 내 검색..."
+            style={{ ...S.inp, minWidth:200 }} />
+          <select value={chFilter} onChange={e => setChFilter(e.target.value)} style={S.sel}>
+            {channels.map(c => <option key={c}>{c}</option>)}
+          </select>
+          <button onClick={() => loadPage(_collectCache.page, true, true)} disabled={loading}
+            style={{ ...S.bBlue, opacity:loading ? 0.6 : 1 }}>
+            {loading ? '로딩 중...' : '🔄 새로고침'}
+          </button>
+          {_collectCache.updatedAt && !loading && (
+            <span style={{ fontSize:'0.78rem', color:'#999' }}>
+              마지막 조회: {new Date(_collectCache.updatedAt).toLocaleTimeString('ko-KR',
+                {hour:'2-digit', minute:'2-digit', second:'2-digit'})}
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginBottom:'0.6rem', fontSize:'0.875rem', color:'#555' }}>
+          전체 <strong>{totalElements.toLocaleString()}</strong>건 중
+          현재 페이지 <strong>{orders.length}</strong>건 표시
+          {search || chFilter !== '전체' ? ` (필터: ${filtered.length}건)` : ''}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign:'center', padding:'3rem', color:'#999' }}>
+            <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>⏳</div>
+            주문 불러오는 중...
+          </div>
+        ) : orders.length === 0 ? (
+          <div style={{ textAlign:'center', padding:'3rem', color:'#bbb' }}>
+            <div style={{ fontSize:'2rem', marginBottom:'0.5rem' }}>📭</div>
+            수집된 주문이 없습니다
+          </div>
+        ) : (
+          <>
+            <div style={{ overflowX:'auto' }}>
+              <table style={{ ...S.tbl, minWidth:900 }}>
+                <thead>
+                  <tr>
+                    {['주문번호','쇼핑몰','수취인','연락처','상품명','옵션','수량','금액','주문일시','상태'].map(h => (
+                      <th key={h} style={S.dth}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((o, idx) => (
+                    <tr key={o.id} style={{ background: idx%2===0 ? '#fff' : '#fafafa' }}
+                      onMouseEnter={e => e.currentTarget.style.background='#f0f4ff'}
+                      onMouseLeave={e => e.currentTarget.style.background = idx%2===0?'#fff':'#fafafa'}>
+                      <td style={{ ...S.dtd, fontWeight:600, color:'#1565c0' }}>{o.orderNo}</td>
+                      <td style={S.dtd}>
+                        <span style={{ padding:'0.15rem 0.5rem', borderRadius:'10px',
+                          background:'#e3f2fd', color:'#1565c0', fontSize:'0.75rem', fontWeight:600 }}>
+                          {o.channel || '-'}
+                        </span>
+                      </td>
+                      <td style={S.dtd}>{o.receiverName || '-'}</td>
+                      <td style={S.dtd}>{o.receiverPhone || '-'}</td>
+                      <td style={{ ...S.dtd, textAlign:'left', maxWidth:180,
+                        overflow:'hidden', textOverflow:'ellipsis' }}>{o.productName || '-'}</td>
+                      <td style={{ ...S.dtd, maxWidth:100, overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {o.optionName || '-'}
+                      </td>
+                      <td style={S.dtd}>{o.quantity}</td>
+                      <td style={{ ...S.dtd, textAlign:'right' }}>
+                        {o.salePrice ? o.salePrice.toLocaleString()+'원' : '-'}
+                      </td>
+                      <td style={{ ...S.dtd, fontSize:'0.75rem', color:'#999' }}>
+                        {o.orderedAt ? new Date(o.orderedAt).toLocaleString('ko-KR',
+                          {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-'}
+                      </td>
+                      <td style={S.dtd}>
+                        <span style={{ padding:'0.2rem 0.5rem', borderRadius:'10px', fontSize:'0.72rem',
+                          fontWeight:600, background:'#e8f5e9', color:'#2e7d32' }}>
+                          {o.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 페이지네이션 */}
+            {totalPages > 1 && (
+              <div style={{ display:'flex', justifyContent:'center', gap:'0.4rem',
+                padding:'1rem', flexWrap:'wrap', alignItems:'center' }}>
+                <button disabled={currentPage===0} onClick={() => loadPage(0)}
+                  style={{ ...S.bGray, opacity:currentPage===0?0.4:1, padding:'0.3rem 0.6rem' }}>«</button>
+                <button disabled={currentPage===0} onClick={() => loadPage(currentPage-1)}
+                  style={{ ...S.bGray, opacity:currentPage===0?0.4:1, padding:'0.3rem 0.6rem' }}>‹</button>
+                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                  const p = Math.max(0, Math.min(currentPage-3, totalPages-7)) + i;
+                  return (
+                    <button key={p} onClick={() => loadPage(p)}
+                      style={{ ...p===currentPage ? S.bBlue : S.bGray, padding:'0.3rem 0.7rem' }}>
+                      {p+1}
+                    </button>
+                  );
+                })}
+                <button disabled={currentPage>=totalPages-1} onClick={() => loadPage(currentPage+1)}
+                  style={{ ...S.bGray, opacity:currentPage>=totalPages-1?0.4:1, padding:'0.3rem 0.6rem' }}>›</button>
+                <button disabled={currentPage>=totalPages-1} onClick={() => loadPage(totalPages-1)}
+                  style={{ ...S.bGray, opacity:currentPage>=totalPages-1?0.4:1, padding:'0.3rem 0.6rem' }}>»</button>
+                <span style={{ fontSize:'0.8rem', color:'#666', marginLeft:'0.5rem' }}>
+                  {currentPage+1} / {totalPages} 페이지
+                </span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 탭 3: 주문 목록
 // ═══════════════════════════════════════════════════════════════════════════
 function TabList({ orders, onDelete, onStatusChange, onClear }) {
@@ -598,43 +801,49 @@ function TabList({ orders, onDelete, onStatusChange, onClear }) {
 // 메인 컴포넌트
 // ═══════════════════════════════════════════════════════════════════════════
 const TABS = [
-  { key:'direct', label:'직접 입력' },
-  { key:'csv',    label:'CSV 업로드' },
-  { key:'list',   label:'주문 목록' },
+  { key:'direct',  label:'직접 입력' },
+  { key:'csv',     label:'CSV 업로드' },
+  { key:'collect', label:'자동수집 현황' },
+  { key:'list',    label:'주문 목록' },
 ];
-
-let _globalOrders = [];
 
 export default function OrderInput() {
   const [tab, setTab] = useState('direct');
-  const [orders, setOrders] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('oms_orders');
-      if (saved) { _globalOrders = JSON.parse(saved); return _globalOrders; }
-    } catch {}
-    return [];
-  });
+  // 주문 목록 탭 = 수동입력 주문만
+  const [orders, setOrders] = useState([]);
 
-  const saveOrders = (list) => {
-    _globalOrders = list;
-    try { sessionStorage.setItem('oms_orders', JSON.stringify(list)); } catch {}
-    setOrders([...list]);
-  };
+  useEffect(() => {
+    // sessionStorage 기존 수동주문 초기화 (백엔드 저장 전환으로 불필요)
+    try { sessionStorage.removeItem('oms_manual_orders'); } catch(e) {}
+  }, []);
 
-  const handleAdd = useCallback((newOrders) => {
-    saveOrders([..._globalOrders, ...newOrders]);
+  // 수동 주문 변경 구독
+  useEffect(() => {
+    const unsub = subscribeOrders(() => {}); // 수동 주문은 백엔드 저장, 직접 관리 불필요
+    return unsub;
+  }, []);
+
+  const handleAdd = useCallback(async (newOrders) => {
+    const result = await addOrders(newOrders);
+    if (result?.saved > 0) {
+      // 저장된 주문을 목록에 추가
+      setOrders(prev => [...newOrders, ...prev]);
+      alert(`${result.saved}건 저장 완료${result.skipped > 0 ? ` (${result.skipped}건 스킵)` : ''}`);
+    } else if (result?.message) {
+      alert(result.message);
+    }
     setTab('list');
   }, []);
 
   const handleDelete = useCallback((id) => {
-    saveOrders(_globalOrders.filter(o=>o.id!==id));
+    deleteOrder(id);
   }, []);
 
   const handleStatusChange = useCallback((id, status) => {
-    saveOrders(_globalOrders.map(o=>o.id===id?{...o,status}:o));
+    updateOrder(id, { status });
   }, []);
 
-  const handleClear = useCallback(() => saveOrders([]), []);
+  const handleClear = useCallback(() => clearOrders(), []);
 
   return (
     <div style={S.page}>
@@ -659,14 +868,16 @@ export default function OrderInput() {
                   {orders.length}
                 </span>
               )}
+
             </button>
           ))}
         </div>
       </div>
 
-      {tab==='direct' && <TabDirect onAdd={handleAdd} />}
-      {tab==='csv'    && <TabCsv    onAdd={handleAdd} />}
-      {tab==='list'   && <TabList   orders={orders} onDelete={handleDelete}
+      {tab==='direct'  && <TabDirect onAdd={handleAdd} />}
+      {tab==='csv'     && <TabCsv    onAdd={handleAdd} />}
+      {tab==='collect' && <TabCollect />}
+      {tab==='list'    && <TabList   orders={orders} onDelete={handleDelete}
                            onStatusChange={handleStatusChange} onClear={handleClear} />}
     </div>
   );

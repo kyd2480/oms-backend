@@ -34,12 +34,12 @@ const tdCenter = { ...tdStyle, textAlign: 'center' };
 // ─── 재고 상태 ────────────────────────────────────────────────────────────
 function getStatusColor(p) {
   if (p.isOutOfStock || p.totalStock === 0) return '#e53e3e';
-  if (p.isBelowSafetyStock) return '#dd6b20';
+  if (p.availableStock === 0) return '#e53e3e';
   return '#38a169';
 }
 function getStatusText(p) {
   if (p.isOutOfStock || p.totalStock === 0) return '재고없음';
-  if (p.isBelowSafetyStock) return '부족';
+  if (p.availableStock === 0) return '재고없음';
   return '정상';
 }
 
@@ -236,22 +236,50 @@ export default function InventoryList() {
       const data = await res.json();
 
       // Spring Page 응답 or 일반 배열 모두 처리
+      let productList = [];
       if (data && typeof data === 'object' && 'content' in data) {
-        // 페이지네이션 응답
-        setProducts(data.content || []);
+        productList = data.content || [];
         setTotalPages(data.totalPages || 0);
         setTotalElements(data.totalElements || 0);
       } else if (Array.isArray(data)) {
-        // 배열 응답 → 프론트에서 슬라이싱
         const start = targetPage * PAGE_SIZE;
-        setProducts(data.slice(start, start + PAGE_SIZE));
+        productList = data.slice(start, start + PAGE_SIZE);
         setTotalPages(Math.ceil(data.length / PAGE_SIZE));
         setTotalElements(data.length);
       } else {
         setProducts([]);
         setTotalPages(0);
         setTotalElements(0);
+        return;
       }
+
+      // 신규 창고 재고 배치 조회 후 상품에 병합
+      try {
+        const productIds = productList.map(p => p.productId).filter(Boolean);
+        if (productIds.length > 0) {
+          const whRes = await fetch(
+            `${API_BASE.replace('/api/inventory', '')}/api/warehouse-stocks/batch`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ productIds })
+            }
+          );
+          if (whRes.ok) {
+            const whData = await whRes.json(); // { productId: [{warehouseCode, stock}] }
+            productList = productList.map(p => {
+              const stocks = whData[p.productId] || [];
+              const extra = {};
+              stocks.forEach(s => {
+                extra[`whStock_${s.warehouseCode}`] = s.stock;
+              });
+              return { ...p, ...extra };
+            });
+          }
+        }
+      } catch (e) { console.warn('창고별 재고 로드 실패', e); }
+
+      setProducts(productList);
     } catch (e) {
       console.error('상품 로드 실패', e);
       setProducts([]);
@@ -302,8 +330,8 @@ export default function InventoryList() {
       case 'ICHEON_PCS': return product.warehouseStockIcheon  ?? '-';
       case 'BUCHEON':    return product.warehouseStockBucheon ?? '-';
       default:
-        // 동적 필드 시도
-        return product[`stock_${whCode}`] ?? product[`warehouseStock_${whCode}`] ?? '-';
+        // 신규 창고: batch API에서 병합된 데이터
+        return product[`whStock_${whCode}`] ?? '-';
     }
   };
 
@@ -352,11 +380,6 @@ export default function InventoryList() {
 
     // 총재고
     cols.push(<th key="total" style={{ ...thStyle, textAlign:'right' }}>총재고</th>);
-
-    // 안전재고
-    if (!viewOpts.simpleView) {
-      cols.push(<th key="safe" style={{ ...thStyle, textAlign:'right' }}>안전재고</th>);
-    }
 
     // 당일 입출고
     if (viewOpts.todayOutbound) {
@@ -419,10 +442,19 @@ export default function InventoryList() {
     }
 
     if (viewOpts.availableStock || (!viewOpts.simpleView && !viewOpts.warehouseQty)) {
+      const calcStock = (() => {
+        let sum = (product.warehouseStockAnyang ?? 0)
+                + (product.warehouseStockIcheon  ?? 0)
+                + (product.warehouseStockBucheon ?? 0);
+        Object.keys(product).forEach(k => {
+          if (k.startsWith('whStock_')) sum += (product[k] ?? 0);
+        });
+        return sum;
+      })();
       cols.push(
         <td key="avail" style={{ ...tdRight, fontWeight:'700',
-          color: (product.availableStock ?? 0) === 0 ? '#e53e3e' : '#000' }}>
-          {(product.availableStock ?? 0).toLocaleString()}
+          color: calcStock === 0 ? '#e53e3e' : '#000' }}>
+          {calcStock.toLocaleString()}
         </td>
       );
     }
@@ -433,13 +465,19 @@ export default function InventoryList() {
 
     cols.push(
       <td key="total" style={{ ...tdRight, fontWeight:'700' }}>
-        {(product.totalStock ?? 0).toLocaleString()}
+        {(() => {
+          // 레거시 3개 창고
+          let sum = (product.warehouseStockAnyang ?? 0)
+                  + (product.warehouseStockIcheon  ?? 0)
+                  + (product.warehouseStockBucheon ?? 0);
+          // 신규 창고 (whStock_ 접두사)
+          Object.keys(product).forEach(k => {
+            if (k.startsWith('whStock_')) sum += (product[k] ?? 0);
+          });
+          return sum.toLocaleString();
+        })()}
       </td>
     );
-
-    if (!viewOpts.simpleView) {
-      cols.push(<td key="safe" style={tdRight}>{(product.safetyStock ?? 0).toLocaleString()}</td>);
-    }
 
     if (viewOpts.todayOutbound) {
       cols.push(<td key="tin"  style={{ ...tdRight, color:'#38a169' }}>+{product.todayInbound  ?? 0}</td>);
@@ -477,10 +515,9 @@ export default function InventoryList() {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',
         gap:'1rem', marginBottom:'1.5rem' }}>
         {[
-          { label:'전체 상품',    value: stats.totalProducts.toLocaleString(),                     color:'#000' },
-          { label:'총 재고 가치', value: stats.totalStockValue.toLocaleString() + '원',            color:'#000' },
-          { label:'부족 상품',    value: stats.lowStockCount.toLocaleString(),                     color:'#dd6b20' },
-          { label:'재고 없음',    value: stats.outOfStockCount.toLocaleString(),                   color:'#e53e3e' },
+          { label:'전체 상품',    value: stats.totalProducts.toLocaleString(),           color:'#000' },
+          { label:'총 재고 가치', value: stats.totalStockValue.toLocaleString() + '원',  color:'#000' },
+          { label:'재고 없음',    value: stats.outOfStockCount.toLocaleString(),          color:'#e53e3e' },
         ].map(s => (
           <div key={s.label} style={{ background:'#fff', padding:'1.5rem', borderRadius:'8px',
             boxShadow:'0 2px 4px rgba(0,0,0,0.1)' }}>
@@ -498,7 +535,6 @@ export default function InventoryList() {
           {/* 필터 버튼 */}
           {[
             { type:'all',           label:'전체',      active:'#667eea' },
-            { type:'low-stock',     label:'⚠️ 부족',   active:'#dd6b20' },
             { type:'out-of-stock',  label:'❌ 재고없음', active:'#e53e3e' },
           ].map(f => (
             <button key={f.type} onClick={() => handleFilterChange(f.type)}

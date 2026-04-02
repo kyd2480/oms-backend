@@ -16,9 +16,6 @@ export default function Sidebar({ user, currentView, setCurrentView, onLogout, o
       </div>
 
       <nav className="nav-menu">
-        <div className={`nav-item ${currentView === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentView('analytics')}>
-          <span>통계 대시보드</span>
-        </div>
         <div className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentView('dashboard')}>
           <span>대시보드</span>
         </div>
@@ -65,13 +62,30 @@ export default function Sidebar({ user, currentView, setCurrentView, onLogout, o
           </div>
         )}
 
-        <div className={`nav-item ${currentView === 'customers' ? 'active' : ''}`} onClick={() => setCurrentView('customers')}>
-          <span>고객 관리</span>
+        <div className={`nav-item ${ ['cs.management','delivery.track','return.management','cancel.management'].includes(currentView) ? 'active' : ''}`}
+          onClick={() => setOpenMenu((p) => ({ ...p, cs: !p.cs }))}>
+          <div className="menu-section-head">
+            <span>🎧 고객CS 관리</span>
+            <span className={`chev ${openMenu.cs ? 'open' : ''}`}>▶</span>
+          </div>
         </div>
-
-        <div className={`nav-item ${currentView === 'delivery' ? 'active' : ''}`} onClick={() => setCurrentView('delivery')}>
-          <span>배송 관리</span>
-        </div>
+        {openMenu.cs && (
+          <div className="submenu">
+            {[
+              { key: 'cs.management',     label: 'CS 관리' },
+              { key: 'delivery.track',    label: '배송흐름' },
+              { key: 'return.management', label: '반품 관리' },
+              { key: 'cancel.management', label: '배송전 취소' },
+            ].map(it => (
+              <div key={it.key}
+                className={`submenu-item ${currentView === it.key ? 'active' : ''}`}
+                onClick={() => setCurrentView(it.key)}>
+                <span className="dot dot-blue" />
+                <span>{it.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className={`nav-item ${currentView === 'channels' ? 'active' : ''}`} onClick={() => setCurrentView('channels')}>
           <span>🏪 판매처 관리</span>

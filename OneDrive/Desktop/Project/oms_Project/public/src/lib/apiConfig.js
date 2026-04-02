@@ -1,11 +1,13 @@
+// auth-service URL: 환경변수 우선, 없으면 Railway URL
+const AUTH_BASE = import.meta.env.VITE_AUTH_URL ||
+  'https://intuitive-friendship-production-17a1.up.railway.app';
+
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:8090',
+  AUTH_URL: AUTH_BASE,
   ENDPOINTS: {
     LOGIN: '/api/auth/login',
-    ORDERS: '/api/order-service/v1/orders',
-    INVENTORY: '/api/inventory-service/v1/inventory',
-    CUSTOMERS: '/api/order-service/v1/customers',
-    DELIVERIES: '/api/delivery-service/v1/deliveries',
-    ANALYTICS: '/api/analytics-service/v1/analytics'
+    SIGNUP: '/api/auth/signup',
+    VALIDATE: '/api/auth/validate',
+    ME: '/api/auth/me',
   }
 };

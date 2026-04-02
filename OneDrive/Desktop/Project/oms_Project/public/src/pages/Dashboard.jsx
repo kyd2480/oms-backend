@@ -7,7 +7,7 @@ import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
 import Chip from '../components/ui/Chip';
 import TableWrap from '../components/ui/TableWrap';
-import AnalyticsDashboard from './AnalyticsDashboard';
+import MainDashboard from './MainDashboard';
 import ChannelManagement from './ChannelManagement';
 import InventoryList from './InventoryList';
 import InboundForm from './InboundForm';
@@ -19,10 +19,23 @@ import BarcodeManagement from './BarcodeManagement';
 import WarehouseManagement from './WarehouseManagement';
 import WarehouseTransfer from './WarehouseTransfer';
 import OrderInput from './OrderInput';
+import DuplicateCheck from './DuplicateCheck';
+import Bundle from './Bundle';
+import StockAllocation from './StockAllocation';
+import StockMatching from './StockMatching';
+import Invoice from './Invoice';
+import InspectShip from './InspectShip';
+import AutoCollect from './AutoCollect';
+import NameMatching from './NameMatching';
+import CSManagement from './CSManagement';
+import DeliveryTracking from './DeliveryTracking';
+import ReturnManagement from './ReturnManagement';
+import CancelManagement from './CancelManagement';
 
 export default function Dashboard({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('dashboard');
-  const [openMenu, setOpenMenu] = useState({ orders: false, inventory: false });
+  const [openMenu, setOpenMenu] = useState({ orders: false, inventory: false, cs: false });
+  const [deliveryParams, setDeliveryParams] = useState(null);
 
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
@@ -138,20 +151,47 @@ export default function Dashboard({ user, onLogout }) {
   );
 
   const renderMain = () => {
-    if (currentView === 'analytics') return <AnalyticsDashboard user={user} />;
-    if (currentView === 'dashboard') return renderDashboardHome();
+
+    if (currentView === 'dashboard') return <MainDashboard user={user} />;
 
     // 주문관리
     if (currentView === 'orders.orderinput') return <OrderInput />;
-    if (currentView === 'orders.dupcheck') return renderTemplate('중복주문체크', '주문 중복을 식별합니다.', '템플릿');
-    if (currentView === 'orders.automatch') return renderTemplate('자동매칭', '주문 ↔ 상품 자동 매칭', '템플릿');
-    if (currentView === 'orders.nameMatch') return renderTemplate('상품명 매칭', '상품명 매칭 룰', '템플릿');
-    if (currentView === 'orders.stockMatch') return renderTemplate('재고 매칭', '주문수량 vs 재고', '템플릿');
-    if (currentView === 'orders.bundle') return renderTemplate('묶음정리', '합포장 그룹핑', '템플릿');
-    if (currentView === 'orders.allocate') return renderTemplate('재고할당', '할당/차감 미리보기', '템플릿');
-    if (currentView === 'orders.invoice') return renderTemplate('송장출력', '송장 생성/출력', '템플릿');
-    if (currentView === 'orders.inspectShip') return renderTemplate('검수발송', '검수/출고 상태', '템플릿');
+    if (currentView === 'orders.dupcheck') return <DuplicateCheck />;
+    if (currentView === 'orders.automatch') return <AutoCollect />;
+    if (currentView === 'orders.nameMatch') return <NameMatching />;
+    if (currentView === 'orders.stockMatch') return <StockMatching />;
+    if (currentView === 'orders.bundle') return <Bundle />;
+    if (currentView === 'orders.allocate') return <StockAllocation />;
+    if (currentView === 'orders.invoice') return <Invoice />;
+    if (currentView === 'orders.inspectShip') return <InspectShip />;
     if (currentView === 'orders.marketShip') return renderTemplate('판매처 발송처리', '마켓 발송처리', '템플릿');
+
+    // CS관리
+    if (currentView === 'cs.management') return (
+      <CSManagement onNavigate={(view, params) => {
+        if (view === 'delivery.track') {
+          setDeliveryParams(params);
+          setCurrentView('delivery.track');
+        } else if (view === 'return.management') {
+          setDeliveryParams(params);
+          setCurrentView('return.management');
+        }
+      }}/>
+    );
+
+    // 배송흐름
+    if (currentView === 'delivery.track') return (
+      <DeliveryTracking initialTracking={deliveryParams}/>
+    );
+
+    // 반품관리
+    if (currentView === 'return.management') {
+      return <ReturnManagement
+        prefilledOrder={deliveryParams?.newReturn || null}
+        onMounted={() => { if (deliveryParams?.newReturn) setDeliveryParams(null); }}
+      />;
+    }
+    if (currentView === 'cancel.management') return <CancelManagement />;
 
     // 재고관리
     if (currentView === 'inventory.product.list') return <InventoryList />;

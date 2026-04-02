@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.1'
+    id 'io.spring.dependency-management' version '1.1.4'
+}
+
+// Gradle Wrapper 설정
+wrapper {
+    gradleVersion = '8.5'
+    distributionType = Wrapper.DistributionType.BIN
+}
+
+group = 'com.oms'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    sourceCompatibility = '17'
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Spring Boot Starters
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    
+    // Scheduler
+    implementation 'org.springframework.boot:spring-boot-starter-quartz'
+    
+    // WebFlux (HTTP Client)
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    
+    // JSON Processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-hibernate5-jakarta:2.15.3'
+    
+    // PostgreSQL
+    runtimeOnly 'org.postgresql:postgresql'
+    
+    // Lombok
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
