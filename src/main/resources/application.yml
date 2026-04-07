@@ -82,3 +82,9 @@ collector:
 delivery:
   post-office:
     api-key: fa54da790c9a4f4c291d48ee1f430d2de79b7942bbad6cde726902dc6659a25e
+
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-5-mini}
+  agent:
+    enabled: ${OPENAI_AGENT_ENABLED:true}

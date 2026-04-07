@@ -9,6 +9,13 @@ spring:
   application:
     name: order-collector-service
   
+  # 파일 업로드 설정
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB
+      max-request-size: 50MB
+  
   # 데이터베이스 설정
   datasource:
     url: jdbc:postgresql://localhost:5437/collector_db
@@ -62,7 +69,7 @@ logging:
 # 주문 수집 설정
 collector:
   schedule:
-    enabled: true  # 스케줄러 켜기
+    enabled: false  # 스케줄러 켜기
     interval: 120000  # 2분 (테스트용, 원래는 600000=10분)
     initial-delay: 30000  # 30초 후 시작
     daily-cron: "0 0 0 * * *"  # 매일 자정
@@ -70,3 +77,14 @@ collector:
   retry:
     max-attempts: 3
     delay: 5000  # 5초
+
+# 배송조회 설정
+delivery:
+  post-office:
+    api-key: fa54da790c9a4f4c291d48ee1f430d2de79b7942bbad6cde726902dc6659a25e
+
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  model: ${OPENAI_MODEL:gpt-5-mini}
+  agent:
+    enabled: ${OPENAI_AGENT_ENABLED:true}

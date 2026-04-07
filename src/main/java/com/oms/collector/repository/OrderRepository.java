@@ -69,6 +69,19 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         @Param("start")  java.time.LocalDateTime start,
         @Param("end")    java.time.LocalDateTime end);
 
+    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.channel c " +
+           "WHERE (:status IS NULL OR o.orderStatus = :status) " +
+           "AND (:keyword IS NULL OR :keyword = '' " +
+           "     OR LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "     OR LOWER(o.recipientName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "     OR LOWER(o.customerName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "     OR LOWER(c.channelName) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> searchForAgent(
+        @Param("keyword") String keyword,
+        @Param("status") Order.OrderStatus status,
+        Pageable pageable);
+
     @Query(value = "SELECT COUNT(*) FROM orders WHERE ordered_at::date = CURRENT_DATE", nativeQuery = true)
     long countTodayOrders();
 
