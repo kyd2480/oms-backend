@@ -93,8 +93,19 @@ public class OmsAgentService {
         }
 
         AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
+        if (proposedAction != null) {
+            return new AgentChatResponse(
+                true,
+                formatActionProposalMessage(proposedAction),
+                model,
+                true,
+                proposedAction,
+                toolCalls,
+                warnings
+            );
+        }
 
-        AgentChatResponse direct = handleDirectQuery(request, warnings, proposedAction);
+        AgentChatResponse direct = handleDirectQuery(request, warnings, null);
         if (direct != null) {
             return direct;
         }
@@ -887,6 +898,14 @@ public class OmsAgentService {
             return answer;
         }
         return answer + "\n\n실행 준비\n- 요청한 작업: " + proposedAction.title() + "\n- 아래 승인 버튼을 누르면 실제 처리됩니다.";
+    }
+
+    private String formatActionProposalMessage(AgentActionProposal proposedAction) {
+        return """
+            요청한 작업을 확인했습니다.
+            - 작업: %s
+            - 안내: 아래 승인 버튼을 누르면 실제 처리됩니다.
+            """.formatted(proposedAction.title());
     }
 
     private String channelDisplayName(String channelKeyword) {

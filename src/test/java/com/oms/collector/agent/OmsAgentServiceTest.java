@@ -159,19 +159,32 @@ class OmsAgentServiceTest {
     }
 
     @Test
-    @DisplayName("직접 응답 케이스에서도 실행 제안이 같이 포함된다")
+    @DisplayName("실행 요청은 조회 없이도 실행 제안을 응답에 포함한다")
     void directQueryIncludesActionProposal() {
-        when(toolService.searchOrders("", "CONFIRMED", 20)).thenReturn(Map.of(
-            "orders", List.of(Map.of("orderNo", "OMS-1", "recipientName", "박서준", "orderedAt", "2026-03-30T11:35:42", "invoiceEntered", false))
-        ));
         when(agentActionService.propose(anyString(), anyString())).thenReturn(
             new AgentActionProposal("AUTO_ASSIGN_INVOICE", "송장 자동부여 실행", "설명", "token-1", true, "medium", Map.of("orderNo", "OMS-1"))
         );
 
-        AgentChatResponse response = service.chat(request("송장 미입력 주문 보여줘"));
+        AgentChatResponse response = service.chat(request("OMS-1 송장번호 부여해줘"));
 
         assertThat(response.proposedAction()).isNotNull();
         assertThat(response.proposedAction().actionType()).isEqualTo("AUTO_ASSIGN_INVOICE");
+        assertThat(response.toolCalls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("실행형 요청은 조회 없이 바로 승인 버튼용 제안으로 응답한다")
+    void actionRequestReturnsProposalImmediately() {
+        when(agentActionService.propose(anyString(), anyString())).thenReturn(
+            new AgentActionProposal("CANCEL_SHIPMENT", "발송 취소 실행", "설명", "token-2", true, "high", Map.of("orderNo", "OMS-9"))
+        );
+
+        AgentChatResponse response = service.chat(request("OMS-9 발송 취소해줘"));
+
+        assertThat(response.proposedAction()).isNotNull();
+        assertThat(response.proposedAction().actionType()).isEqualTo("CANCEL_SHIPMENT");
+        assertThat(response.toolCalls()).isEmpty();
+        assertThat(response.answer()).contains("아래 승인 버튼");
     }
 
     private AgentChatRequest request(String message) {
