@@ -20,6 +20,9 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -34,6 +37,7 @@ public class OmsAgentService {
 
     private static final String RESPONSES_API = "https://api.openai.com/v1/responses";
     private static final Duration OPENAI_TIMEOUT = Duration.ofSeconds(45);
+    private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final String SYSTEM_PROMPT = """
         너는 OMS 운영 도우미다.
         목표는 한국어로 간결하고 실무적으로 답하는 것이다.
@@ -351,9 +355,10 @@ public class OmsAgentService {
             return new AgentChatResponse(true, formatRecentOrders(result), model, true, null, toolCalls, warnings);
         }
 
-        if (containsAny(message, "오늘 주문", "주문 현황", "주문 요약")) {
-            Map<String, Object> result = toolService.getOrderOverview("today");
-            toolCalls.add(Map.of("name", "get_order_overview", "arguments", Map.of("period", "today")));
+        if (containsAny(message, "주문 현황", "주문 요약", "주문 상태", "오늘 주문", "일주일", "7일", "한달", "30일", "월간", "주간")) {
+            String period = detectOrderOverviewPeriod(message);
+            Map<String, Object> result = toolService.getOrderOverview(period);
+            toolCalls.add(Map.of("name", "get_order_overview", "arguments", Map.of("period", period)));
             return new AgentChatResponse(true, formatOverview(result), model, true, null, toolCalls, warnings);
         }
 
@@ -403,30 +408,76 @@ public class OmsAgentService {
         return false;
     }
 
-    private String formatOverview(Map<String, Object> result) {
-        return """
-            요약: %s 기준 totalOrders %s건, pendingOrders %s건, confirmedOrders %s건, shippedOrders %s건, cancelledOrders %s건입니다.
+    private String detectOrderOverviewPeriod(String message) {
+        if (containsAny(message, "한달", "1개월", "30일", "30 일", "월간", "한 달")) {
+            return "30d";
+        }
+        if (containsAny(message, "일주일", "7일", "7 일", "주간", "이번 주", "최근 일주일")) {
+            return "7d";
+        }
+        return "today";
+    }
 
-            최근 주문 기준:
-            - latestOrderNo: %s
-            - latestOrderedAt: %s
-            - zone: %s
+    private String formatOverview(Map<String, Object> result) {
+        String periodLabel = switch (String.valueOf(result.getOrDefault("period", ""))) {
+            case "30d" -> "최근 30일";
+            case "7d" -> "최근 7일";
+            default -> "오늘";
+        };
+        String topChannels = formatTopChannels(result.get("topChannels"));
+        String recentDailyCounts = formatRecentDailyCounts(result.get("recentDailyCounts"));
+        String latestOrderedAt = formatDateTime(result.get("latestOrderedAt"));
+
+        return """
+            %s 주문 현황입니다.
+
+            조회 기간
+            - 시작일: %s
+            - 종료일: %s
+
+            주문 집계
+            - 총 주문: %s건
+            - 대기 주문: %s건
+            - 확정 주문: %s건
+            - 발송 완료: %s건
+            - 취소 주문: %s건
+
+            주요 판매처
+            %s
+
+            최근 일자별 주문
+            %s
+
+            가장 최근 주문
+            - 주문번호: %s
+            - 주문시각: %s
+            - 기준 시간대: %s
             """.formatted(
-            result.getOrDefault("period", ""),
+            periodLabel,
+            result.getOrDefault("startDate", "-"),
+            result.getOrDefault("endDate", "-"),
             result.getOrDefault("totalOrders", 0),
             result.getOrDefault("pendingOrders", 0),
             result.getOrDefault("confirmedOrders", 0),
             result.getOrDefault("shippedOrders", 0),
             result.getOrDefault("cancelledOrders", 0),
-            result.getOrDefault("latestOrderNo", "-"),
-            result.getOrDefault("latestOrderedAt", "-"),
-            result.getOrDefault("zone", "Asia/Seoul")
+            topChannels,
+            recentDailyCounts,
+            valueOrDash(result.get("latestOrderNo")),
+            latestOrderedAt,
+            valueOrDash(result.get("zone"))
         );
     }
 
     private String formatInventory(Map<String, Object> result) {
         return """
-            재고 요약: totalProducts %s개, totalStock %s개, availableStock %s개, reservedStock %s개, outOfStockCount %s개입니다.
+            재고 현황입니다.
+
+            - 전체 상품 수: %s개
+            - 전체 재고 수량: %s개
+            - 사용 가능 재고: %s개
+            - 예약 재고: %s개
+            - 품절 상품 수: %s개
             """.formatted(
             result.getOrDefault("totalProducts", 0),
             result.getOrDefault("totalStock", 0),
@@ -445,14 +496,80 @@ public class OmsAgentService {
         String lines = orders.stream()
             .sorted(Comparator.comparing(o -> String.valueOf(o.getOrDefault("orderedAt", "")), Comparator.reverseOrder()))
             .limit(5)
-            .map(o -> "- %s | %s | %s | %s".formatted(
-                o.getOrDefault("orderNo", "-"),
-                o.getOrDefault("status", "-"),
-                o.getOrDefault("recipientName", "-"),
-                o.getOrDefault("orderedAt", "-")
+            .map(o -> "- 주문번호 %s / 상태 %s / 수취인 %s / 주문시각 %s".formatted(
+                valueOrDash(o.get("orderNo")),
+                formatOrderStatus(o.get("status")),
+                valueOrDash(o.get("recipientName")),
+                formatDateTime(o.get("orderedAt"))
             ))
             .reduce((a, b) -> a + "\n" + b)
             .orElse("");
-        return "최근 주문 " + result.getOrDefault("count", orders.size()) + "건 중 상위 5건입니다.\n" + lines;
+        return "최근 주문 " + result.getOrDefault("count", orders.size()) + "건 중 최신 5건입니다.\n\n" + lines;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatTopChannels(Object rawValue) {
+        if (!(rawValue instanceof List<?> channels) || channels.isEmpty()) {
+            return "- 집계된 판매처 정보가 없습니다.";
+        }
+        return channels.stream()
+            .filter(Map.class::isInstance)
+            .map(Map.class::cast)
+            .limit(5)
+            .map(channel -> "- %s: %s건".formatted(
+                valueOrDash(channel.get("channelName")),
+                channel.getOrDefault("count", 0)
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("- 집계된 판매처 정보가 없습니다.");
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatRecentDailyCounts(Object rawValue) {
+        if (!(rawValue instanceof List<?> dailyCounts) || dailyCounts.isEmpty()) {
+            return "- 최근 일자별 주문 데이터가 없습니다.";
+        }
+        return dailyCounts.stream()
+            .filter(Map.class::isInstance)
+            .map(Map.class::cast)
+            .limit(7)
+            .map(day -> "- %s: %s건".formatted(
+                valueOrDash(day.get("date")),
+                day.getOrDefault("count", 0)
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("- 최근 일자별 주문 데이터가 없습니다.");
+    }
+
+    private String formatDateTime(Object rawValue) {
+        String value = rawValue != null ? String.valueOf(rawValue).trim() : "";
+        if (value.isBlank()) {
+            return "-";
+        }
+        try {
+            return LocalDateTime.parse(value).format(DATE_TIME_FORMAT);
+        } catch (Exception ignored) {
+        }
+        try {
+            return LocalDate.parse(value).toString();
+        } catch (Exception ignored) {
+        }
+        return value;
+    }
+
+    private String formatOrderStatus(Object rawValue) {
+        String value = rawValue != null ? String.valueOf(rawValue).trim().toUpperCase(Locale.ROOT) : "";
+        return switch (value) {
+            case "PENDING" -> "대기";
+            case "CONFIRMED" -> "확정";
+            case "SHIPPED" -> "발송 완료";
+            case "CANCELLED" -> "취소";
+            default -> value.isBlank() ? "-" : value;
+        };
+    }
+
+    private String valueOrDash(Object rawValue) {
+        String value = rawValue != null ? String.valueOf(rawValue).trim() : "";
+        return value.isBlank() ? "-" : value;
     }
 }
