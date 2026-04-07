@@ -20,7 +20,6 @@ public class AgentController {
 
     @PostMapping("/chat")
     public ResponseEntity<AgentChatResponse> chat(@RequestBody AgentChatRequest request) {
-        AgentChatResponse response = omsAgentService.chat(request);
-        return response.success() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+        return ResponseEntity.ok(omsAgentService.chat(request));
     }
 }

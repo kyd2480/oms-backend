@@ -13,9 +13,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.netty.http.client.HttpClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,6 +30,7 @@ import java.util.Map;
 public class OmsAgentService {
 
     private static final String RESPONSES_API = "https://api.openai.com/v1/responses";
+    private static final Duration OPENAI_TIMEOUT = Duration.ofSeconds(45);
     private static final String SYSTEM_PROMPT = """
         너는 OMS 운영 도우미다.
         목표는 한국어로 간결하고 실무적으로 답하는 것이다.
@@ -76,14 +80,20 @@ public class OmsAgentService {
             );
         }
 
+        HttpClient httpClient = HttpClient.create()
+            .responseTimeout(OPENAI_TIMEOUT);
+
         WebClient client = WebClient.builder()
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
             .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
             .build();
 
         try {
+            log.info("Agent request started: user={}, model={}", request.userName(), model);
             JsonNode response = createResponse(client, buildInitialPayload(request));
             for (int i = 0; i < 6 && hasFunctionCalls(response); i++) {
+                log.info("Agent tool round {} started", i + 1);
                 ArrayNode toolOutputs = objectMapper.createArrayNode();
                 for (JsonNode node : response.path("output")) {
                     if (!"function_call".equals(node.path("type").asText())) {
@@ -93,6 +103,7 @@ public class OmsAgentService {
                     String callId = node.path("call_id").asText();
                     JsonNode args = parseJson(node.path("arguments").asText("{}"));
                     Map<String, Object> toolResult = executeTool(name, args);
+                    log.info("Agent tool executed: name={}, args={}", name, args);
                     toolCalls.add(Map.of("name", name, "arguments", objectMapper.convertValue(args, Map.class)));
 
                     ObjectNode output = toolOutputs.addObject();
@@ -115,15 +126,24 @@ public class OmsAgentService {
                 answer = "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
             }
 
+            log.info("Agent request completed: toolCalls={}", toolCalls.size());
             return new AgentChatResponse(true, answer, model, true, toolCalls, warnings);
         } catch (WebClientResponseException e) {
+            String detail = extractErrorDetail(e.getResponseBodyAsString());
             log.error("OpenAI API error: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
             warnings.add("OpenAI API 호출이 실패했습니다.");
-            return new AgentChatResponse(false, "AI 호출에 실패했습니다. API 키, 모델명, 네트워크 설정을 확인하세요.", model, true, toolCalls, warnings);
+            return new AgentChatResponse(
+                false,
+                "OpenAI API 호출 실패 (" + e.getStatusCode().value() + "): " + detail,
+                model,
+                true,
+                toolCalls,
+                warnings
+            );
         } catch (Exception e) {
             log.error("Agent chat failed", e);
             warnings.add("에이전트 처리 중 예외가 발생했습니다.");
-            return new AgentChatResponse(false, "에이전트 처리 중 오류가 발생했습니다. 서버 로그를 확인하세요.", model, true, toolCalls, warnings);
+            return new AgentChatResponse(false, "에이전트 처리 중 오류가 발생했습니다: " + e.getMessage(), model, true, toolCalls, warnings);
         }
     }
 
@@ -133,6 +153,7 @@ public class OmsAgentService {
             .bodyValue(payload)
             .retrieve()
             .bodyToMono(JsonNode.class)
+            .timeout(OPENAI_TIMEOUT)
             .block();
     }
 
@@ -290,6 +311,18 @@ public class OmsAgentService {
         } catch (Exception e) {
             return objectMapper.createObjectNode();
         }
+    }
+
+    private String extractErrorDetail(String rawBody) {
+        if (blank(rawBody)) {
+            return "응답 본문이 없습니다. API 키, 모델명, 네트워크 설정을 확인하세요.";
+        }
+        JsonNode body = parseJson(rawBody);
+        String message = body.path("error").path("message").asText("");
+        if (!blank(message)) {
+            return message;
+        }
+        return rawBody;
     }
 
     private boolean blank(String value) {

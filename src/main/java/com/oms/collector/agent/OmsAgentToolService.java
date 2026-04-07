@@ -10,6 +10,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZoneId;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -23,11 +24,13 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class OmsAgentToolService {
 
+    private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
+
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
 
     public Map<String, Object> getOrderOverview(String period) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(OMS_ZONE);
         LocalDate startDate = switch (normalize(period)) {
             case "today" -> today;
             case "30d" -> today.minusDays(29);
@@ -55,17 +58,39 @@ public class OmsAgentToolService {
             .map(e -> Map.<String, Object>of("channelName", e.getKey(), "count", e.getValue()))
             .toList();
 
-        return Map.of(
-            "period", normalize(period),
-            "startDate", startDate.toString(),
-            "endDate", today.toString(),
-            "totalOrders", orders.size(),
-            "pendingOrders", pending,
-            "confirmedOrders", confirmed,
-            "shippedOrders", shipped,
-            "cancelledOrders", cancelled,
-            "topChannels", topChannels
-        );
+        Map<String, Long> dailyCounts = orders.stream()
+            .filter(o -> o.getOrderedAt() != null)
+            .collect(Collectors.groupingBy(
+                o -> o.getOrderedAt().atZone(OMS_ZONE).toLocalDate().toString(),
+                LinkedHashMap::new,
+                Collectors.counting()
+            ));
+
+        List<Map<String, Object>> recentDailyCounts = dailyCounts.entrySet().stream()
+            .sorted(Map.Entry.<String, Long>comparingByKey().reversed())
+            .limit(7)
+            .map(e -> Map.<String, Object>of("date", e.getKey(), "count", e.getValue()))
+            .toList();
+
+        Order latestOrder = orderRepository.findFirstByOrderByOrderedAtDesc().orElse(null);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("period", normalize(period));
+        result.put("zone", OMS_ZONE.getId());
+        result.put("startDate", startDate.toString());
+        result.put("endDate", today.toString());
+        result.put("totalOrders", orders.size());
+        result.put("pendingOrders", pending);
+        result.put("confirmedOrders", confirmed);
+        result.put("shippedOrders", shipped);
+        result.put("cancelledOrders", cancelled);
+        result.put("topChannels", topChannels);
+        result.put("recentDailyCounts", recentDailyCounts);
+        result.put("latestOrderNo", latestOrder != null ? nullable(latestOrder.getOrderNo()) : "");
+        result.put("latestOrderedAt", latestOrder != null && latestOrder.getOrderedAt() != null
+            ? latestOrder.getOrderedAt().atZone(OMS_ZONE).toLocalDateTime().toString()
+            : "");
+        return result;
     }
 
     public Map<String, Object> searchOrders(String keyword, String status, Integer limit) {
