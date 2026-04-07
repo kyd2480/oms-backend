@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.oms.collector.agent.dto.AgentActionProposal;
 import com.oms.collector.agent.dto.AgentChatMessage;
 import com.oms.collector.agent.dto.AgentChatRequest;
 import com.oms.collector.agent.dto.AgentChatResponse;
@@ -37,7 +38,7 @@ public class OmsAgentService {
         반드시 현재 OMS 도구로 확인한 사실만 단정적으로 말해라.
         데이터가 부족하면 추정이라고 명시해라.
         허용 범위는 조회, 요약, 분석, 우선순위 제안이다.
-        삭제, 수정, 발송, 재고조정 같은 실행형 작업은 하지 말고 실행하지 않았다고 명확히 적어라.
+        실행형 작업 요청이 와도 직접 실행하지 말고, 어떤 작업이 가능한지와 확인이 필요하다는 점만 설명해라.
         답변 형식:
         - 첫 문단에 핵심 결론
         - 필요하면 짧은 항목으로 근거
@@ -45,6 +46,7 @@ public class OmsAgentService {
         """;
 
     private final OmsAgentToolService toolService;
+    private final AgentActionService agentActionService;
     private final ObjectMapper objectMapper;
 
     @Value("${openai.api-key:}")
@@ -61,11 +63,11 @@ public class OmsAgentService {
         List<Map<String, Object>> toolCalls = new ArrayList<>();
 
         if (!agentEnabled) {
-            return new AgentChatResponse(false, "AI 에이전트가 비활성화되어 있습니다. `openai.agent.enabled=true`로 설정하세요.", model, false, toolCalls, warnings);
+            return new AgentChatResponse(false, "AI 에이전트가 비활성화되어 있습니다. `openai.agent.enabled=true`로 설정하세요.", model, false, null, toolCalls, warnings);
         }
 
         if (request == null || blank(request.message())) {
-            return new AgentChatResponse(false, "질문이 비어 있습니다.", model, !blank(apiKey), toolCalls, warnings);
+            return new AgentChatResponse(false, "질문이 비어 있습니다.", model, !blank(apiKey), null, toolCalls, warnings);
         }
 
         if (blank(apiKey)) {
@@ -75,6 +77,7 @@ public class OmsAgentService {
                 "AI 에이전트 연결 전입니다. 서버 환경변수 `OPENAI_API_KEY`를 설정하면 주문/재고 요약형 질의를 처리할 수 있습니다.",
                 model,
                 false,
+                null,
                 toolCalls,
                 warnings
             );
@@ -126,8 +129,9 @@ public class OmsAgentService {
                 answer = "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
             }
 
+            AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
             log.info("Agent request completed: toolCalls={}", toolCalls.size());
-            return new AgentChatResponse(true, answer, model, true, toolCalls, warnings);
+            return new AgentChatResponse(true, answer, model, true, proposedAction, toolCalls, warnings);
         } catch (WebClientResponseException e) {
             String detail = extractErrorDetail(e.getResponseBodyAsString());
             log.error("OpenAI API error: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString());
@@ -137,13 +141,14 @@ public class OmsAgentService {
                 "OpenAI API 호출 실패 (" + e.getStatusCode().value() + "): " + detail,
                 model,
                 true,
+                null,
                 toolCalls,
                 warnings
             );
         } catch (Exception e) {
             log.error("Agent chat failed", e);
             warnings.add("에이전트 처리 중 예외가 발생했습니다.");
-            return new AgentChatResponse(false, "에이전트 처리 중 오류가 발생했습니다: " + e.getMessage(), model, true, toolCalls, warnings);
+            return new AgentChatResponse(false, "에이전트 처리 중 오류가 발생했습니다: " + e.getMessage(), model, true, null, toolCalls, warnings);
         }
     }
 

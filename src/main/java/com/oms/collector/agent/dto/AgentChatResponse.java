@@ -8,6 +8,7 @@ public record AgentChatResponse(
     String answer,
     String model,
     boolean configured,
+    AgentActionProposal proposedAction,
     List<Map<String, Object>> toolCalls,
     List<String> warnings
 ) {}

@@ -175,6 +175,27 @@ public class OmsAgentToolService {
         );
     }
 
+    public Map<String, Object> executeTool(String name, Map<String, Object> args) {
+        return switch (name) {
+            case "get_order_overview" -> getOrderOverview(stringArg(args, "period", "7d"));
+            case "search_orders" -> searchOrders(
+                stringArg(args, "keyword", ""),
+                stringArg(args, "status", "ALL"),
+                intArg(args, "limit", 10)
+            );
+            case "get_inventory_overview" -> getInventoryOverview();
+            case "search_products" -> searchProducts(
+                stringArg(args, "keyword", ""),
+                intArg(args, "limit", 10)
+            );
+            default -> {
+                Map<String, Object> error = new LinkedHashMap<>();
+                error.put("error", "Unknown tool: " + name);
+                yield error;
+            }
+        };
+    }
+
     private String summarizeItems(Order order) {
         return order.getItems().stream()
             .limit(3)
@@ -206,6 +227,26 @@ public class OmsAgentToolService {
 
     private int safeInt(Integer value) {
         return value != null ? value : 0;
+    }
+
+    private int intArg(Map<String, Object> args, String key, int defaultValue) {
+        Object value = args != null ? args.get(key) : null;
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
+    }
+
+    private String stringArg(Map<String, Object> args, String key, String defaultValue) {
+        Object value = args != null ? args.get(key) : null;
+        return value != null ? String.valueOf(value) : defaultValue;
     }
 
     private String nullable(String value) {
