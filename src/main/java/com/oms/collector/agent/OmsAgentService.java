@@ -21,8 +21,10 @@ import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Slf4j
@@ -83,6 +85,11 @@ public class OmsAgentService {
             );
         }
 
+        AgentChatResponse direct = handleDirectQuery(request, warnings);
+        if (direct != null) {
+            return direct;
+        }
+
         HttpClient httpClient = HttpClient.create()
             .responseTimeout(OPENAI_TIMEOUT);
 
@@ -126,7 +133,7 @@ public class OmsAgentService {
             String answer = extractText(response);
             if (blank(answer)) {
                 warnings.add("모델 응답이 비어 있어 기본 메시지로 대체했습니다.");
-                answer = "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
+                answer = fallbackAnswer(request.message(), toolCalls);
             }
 
             AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
@@ -332,5 +339,120 @@ public class OmsAgentService {
 
     private boolean blank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private AgentChatResponse handleDirectQuery(AgentChatRequest request, List<String> warnings) {
+        String message = request.message() != null ? request.message().toLowerCase(Locale.ROOT) : "";
+        List<Map<String, Object>> toolCalls = new ArrayList<>();
+
+        if (containsAny(message, "최근 주문", "최근 주문건", "최근 주문 보여", "latest orders")) {
+            Map<String, Object> result = toolService.searchOrders("", "ALL", 10);
+            toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "ALL", "limit", 10)));
+            return new AgentChatResponse(true, formatRecentOrders(result), model, true, null, toolCalls, warnings);
+        }
+
+        if (containsAny(message, "오늘 주문", "주문 현황", "주문 요약")) {
+            Map<String, Object> result = toolService.getOrderOverview("today");
+            toolCalls.add(Map.of("name", "get_order_overview", "arguments", Map.of("period", "today")));
+            return new AgentChatResponse(true, formatOverview(result), model, true, null, toolCalls, warnings);
+        }
+
+        if (containsAny(message, "재고 요약", "재고 현황", "재고 부족")) {
+            Map<String, Object> result = toolService.getInventoryOverview();
+            toolCalls.add(Map.of("name", "get_inventory_overview", "arguments", Map.of()));
+            return new AgentChatResponse(true, formatInventory(result), model, true, null, toolCalls, warnings);
+        }
+
+        return null;
+    }
+
+    private String fallbackAnswer(String message, List<Map<String, Object>> toolCalls) {
+        if (!toolCalls.isEmpty()) {
+            String toolName = String.valueOf(toolCalls.get(toolCalls.size() - 1).get("name"));
+            if ("get_order_overview".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatOverview(result);
+            }
+            if ("search_orders".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatRecentOrders(result);
+            }
+            if ("get_inventory_overview".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatInventory(result);
+            }
+            if ("search_products".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return "상품 조회 결과 " + result.getOrDefault("count", 0) + "건입니다.";
+            }
+        }
+        return "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castArgs(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private boolean containsAny(String source, String... needles) {
+        for (String needle : needles) {
+            if (source.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String formatOverview(Map<String, Object> result) {
+        return """
+            요약: %s 기준 totalOrders %s건, pendingOrders %s건, confirmedOrders %s건, shippedOrders %s건, cancelledOrders %s건입니다.
+
+            최근 주문 기준:
+            - latestOrderNo: %s
+            - latestOrderedAt: %s
+            - zone: %s
+            """.formatted(
+            result.getOrDefault("period", ""),
+            result.getOrDefault("totalOrders", 0),
+            result.getOrDefault("pendingOrders", 0),
+            result.getOrDefault("confirmedOrders", 0),
+            result.getOrDefault("shippedOrders", 0),
+            result.getOrDefault("cancelledOrders", 0),
+            result.getOrDefault("latestOrderNo", "-"),
+            result.getOrDefault("latestOrderedAt", "-"),
+            result.getOrDefault("zone", "Asia/Seoul")
+        );
+    }
+
+    private String formatInventory(Map<String, Object> result) {
+        return """
+            재고 요약: totalProducts %s개, totalStock %s개, availableStock %s개, reservedStock %s개, outOfStockCount %s개입니다.
+            """.formatted(
+            result.getOrDefault("totalProducts", 0),
+            result.getOrDefault("totalStock", 0),
+            result.getOrDefault("availableStock", 0),
+            result.getOrDefault("reservedStock", 0),
+            result.getOrDefault("outOfStockCount", 0)
+        );
+    }
+
+    private String formatRecentOrders(Map<String, Object> result) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+        if (orders.isEmpty()) {
+            return "최근 주문 조회 결과가 없습니다.";
+        }
+        String lines = orders.stream()
+            .sorted(Comparator.comparing(o -> String.valueOf(o.getOrDefault("orderedAt", "")), Comparator.reverseOrder()))
+            .limit(5)
+            .map(o -> "- %s | %s | %s | %s".formatted(
+                o.getOrDefault("orderNo", "-"),
+                o.getOrDefault("status", "-"),
+                o.getOrDefault("recipientName", "-"),
+                o.getOrDefault("orderedAt", "-")
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+        return "최근 주문 " + result.getOrDefault("count", orders.size()) + "건 중 상위 5건입니다.\n" + lines;
     }
 }
