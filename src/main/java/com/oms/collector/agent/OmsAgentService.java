@@ -40,15 +40,17 @@ public class OmsAgentService {
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final String SYSTEM_PROMPT = """
         너는 OMS 운영 도우미다.
-        목표는 한국어로 간결하고 실무적으로 답하는 것이다.
+        목표는 한국어로 짧고 실무적으로 답하는 것이다.
         반드시 현재 OMS 도구로 확인한 사실만 단정적으로 말해라.
         데이터가 부족하면 추정이라고 명시해라.
         허용 범위는 조회, 요약, 분석, 우선순위 제안이다.
         실행형 작업 요청이 와도 직접 실행하지 말고, 어떤 작업이 가능한지와 확인이 필요하다는 점만 설명해라.
+        raw json, key=value 나열, 내부 파라미터명(keyword, status, limit 등) 출력은 금지한다.
+        답변은 최대 6줄 안쪽으로 작성해라.
         답변 형식:
-        - 첫 문단에 핵심 결론
-        - 필요하면 짧은 항목으로 근거
-        - 숫자와 상태명은 원문 그대로 유지
+        - 첫 줄에 결론
+        - 필요할 때만 2~4개의 짧은 항목
+        - 숫자와 상태명은 읽기 쉬운 한국어 문장으로 정리
         """;
 
     private final OmsAgentToolService toolService;
@@ -89,7 +91,9 @@ public class OmsAgentService {
             );
         }
 
-        AgentChatResponse direct = handleDirectQuery(request, warnings);
+        AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
+
+        AgentChatResponse direct = handleDirectQuery(request, warnings, proposedAction);
         if (direct != null) {
             return direct;
         }
@@ -140,7 +144,6 @@ public class OmsAgentService {
                 answer = fallbackAnswer(request.message(), toolCalls);
             }
 
-            AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
             log.info("Agent request completed: toolCalls={}", toolCalls.size());
             return new AgentChatResponse(true, answer, model, true, proposedAction, toolCalls, warnings);
         } catch (WebClientResponseException e) {
@@ -345,27 +348,34 @@ public class OmsAgentService {
         return value == null || value.isBlank();
     }
 
-    private AgentChatResponse handleDirectQuery(AgentChatRequest request, List<String> warnings) {
+    private AgentChatResponse handleDirectQuery(AgentChatRequest request, List<String> warnings, AgentActionProposal proposedAction) {
         String message = request.message() != null ? request.message().toLowerCase(Locale.ROOT) : "";
         List<Map<String, Object>> toolCalls = new ArrayList<>();
 
         if (containsAny(message, "최근 주문", "최근 주문건", "최근 주문 보여", "latest orders")) {
             Map<String, Object> result = toolService.searchOrders("", "ALL", 10);
             toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "ALL", "limit", 10)));
-            return new AgentChatResponse(true, formatRecentOrders(result), model, true, null, toolCalls, warnings);
+            return new AgentChatResponse(true, appendActionGuide(formatRecentOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        String orderSearchKeyword = extractOrderSearchKeyword(message);
+        if (orderSearchKeyword != null) {
+            Map<String, Object> result = toolService.searchOrders(orderSearchKeyword, "ALL", 20);
+            toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", orderSearchKeyword, "status", "ALL", "limit", 20)));
+            return new AgentChatResponse(true, appendActionGuide(formatOrderSearchResult(orderSearchKeyword, result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
         if (containsAny(message, "주문 현황", "주문 요약", "주문 상태", "오늘 주문", "일주일", "7일", "한달", "30일", "월간", "주간")) {
             String period = detectOrderOverviewPeriod(message);
             Map<String, Object> result = toolService.getOrderOverview(period);
             toolCalls.add(Map.of("name", "get_order_overview", "arguments", Map.of("period", period)));
-            return new AgentChatResponse(true, formatOverview(result), model, true, null, toolCalls, warnings);
+            return new AgentChatResponse(true, appendActionGuide(formatOverview(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
         if (containsAny(message, "재고 요약", "재고 현황", "재고 부족")) {
             Map<String, Object> result = toolService.getInventoryOverview();
             toolCalls.add(Map.of("name", "get_inventory_overview", "arguments", Map.of()));
-            return new AgentChatResponse(true, formatInventory(result), model, true, null, toolCalls, warnings);
+            return new AgentChatResponse(true, appendActionGuide(formatInventory(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
         return null;
@@ -416,6 +426,33 @@ public class OmsAgentService {
             return "7d";
         }
         return "today";
+    }
+
+    private String extractOrderSearchKeyword(String message) {
+        String normalized = message.trim();
+        if (!containsAny(normalized, "찾아", "조회", "검색", "주문번호", "수취인", "고객")) {
+            return null;
+        }
+        if (containsAny(normalized, "주문 현황", "주문 요약", "주문 상태", "최근 주문", "오늘 주문", "일주일", "7일", "한달", "30일")) {
+            return null;
+        }
+
+        String keyword = normalized
+            .replace("주문번호", " ")
+            .replace("수취인", " ")
+            .replace("고객", " ")
+            .replace("주문", " ")
+            .replace("찾아줘", " ")
+            .replace("찾아 봐", " ")
+            .replace("찾아봐", " ")
+            .replace("조회해줘", " ")
+            .replace("조회", " ")
+            .replace("검색해줘", " ")
+            .replace("검색", " ")
+            .replace("해줘", " ")
+            .trim();
+
+        return keyword.isBlank() ? null : keyword;
     }
 
     private String formatOverview(Map<String, Object> result) {
@@ -507,6 +544,35 @@ public class OmsAgentService {
         return "최근 주문 " + result.getOrDefault("count", orders.size()) + "건 중 최신 5건입니다.\n\n" + lines;
     }
 
+    private String formatOrderSearchResult(String keyword, Map<String, Object> result) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+
+        if (orders.isEmpty()) {
+            return """
+                '%s' 검색 결과가 없습니다.
+                - 검색어를 더 짧게 바꾸거나
+                - 주문번호, 수취인명, 고객명 중 하나로 다시 조회해 주세요.
+                """.formatted(keyword);
+        }
+
+        String lines = orders.stream()
+            .sorted(Comparator.comparing(o -> String.valueOf(o.getOrDefault("orderedAt", "")), Comparator.reverseOrder()))
+            .limit(3)
+            .map(o -> "- %s / %s / %s".formatted(
+                valueOrDash(o.get("orderNo")),
+                formatOrderStatus(o.get("status")),
+                valueOrDash(o.get("recipientName"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+
+        return """
+            '%s' 검색 결과 %s건입니다.
+            %s
+            """.formatted(keyword, result.getOrDefault("count", orders.size()), lines);
+    }
+
     @SuppressWarnings("unchecked")
     private String formatTopChannels(Object rawValue) {
         if (!(rawValue instanceof List<?> channels) || channels.isEmpty()) {
@@ -571,5 +637,12 @@ public class OmsAgentService {
     private String valueOrDash(Object rawValue) {
         String value = rawValue != null ? String.valueOf(rawValue).trim() : "";
         return value.isBlank() ? "-" : value;
+    }
+
+    private String appendActionGuide(String answer, AgentActionProposal proposedAction) {
+        if (proposedAction == null) {
+            return answer;
+        }
+        return answer + "\n\n실행 준비\n- 요청한 작업: " + proposedAction.title() + "\n- 아래 승인 버튼을 누르면 실제 처리됩니다.";
     }
 }

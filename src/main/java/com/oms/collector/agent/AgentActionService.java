@@ -45,7 +45,9 @@ public class AgentActionService {
         String warehouseCode = extract(WAREHOUSE_PATTERN, message);
         String memoContent = extract(MEMO_PATTERN, message);
 
-        if (orderNo != null && containsAny(normalized, "송장 자동", "송장부여", "송장 자동부여", "auto assign")) {
+        if (orderNo != null && containsAny(normalized,
+            "송장 자동", "송장부여", "송장 자동부여", "송장 번호 부여", "송장번호 부여", "송장 번호 등록", "송장번호 등록", "송장 등록", "송장 넣어", "송장 입력",
+            "auto assign")) {
             return storeProposal(
                 "AUTO_ASSIGN_INVOICE",
                 "송장 자동부여 실행",
