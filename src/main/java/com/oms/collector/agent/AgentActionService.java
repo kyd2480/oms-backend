@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 public class AgentActionService {
 
     private static final Pattern ORDER_PATTERN = Pattern.compile("(OMS-[A-Za-z0-9\\-]+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern WAREHOUSE_PATTERN = Pattern.compile("\\b(ANYANG|ICHEON_BOX|ICHEON_PCS|BUCHEON)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern WAREHOUSE_PATTERN = Pattern.compile("(ANYANG|ICHEON_BOX|ICHEON_PCS|BUCHEON)", Pattern.CASE_INSENSITIVE);
     private static final Pattern MEMO_PATTERN = Pattern.compile("(?:메모|memo)\\s*[:：]?\\s*(.+)$", Pattern.CASE_INSENSITIVE);
     private static final long TOKEN_TTL_SECONDS = 600;
 
@@ -110,7 +110,7 @@ public class AgentActionService {
             );
         }
 
-        if (warehouseCode != null && containsAny(normalized, "할당 창고", "창고 설정", "set warehouse")) {
+        if (warehouseCode != null && containsAny(normalized, "할당 창고", "창고 설정", "창고를", "설정해줘", "으로 설정", "set warehouse")) {
             return storeProposal(
                 "SET_ALLOCATION_WAREHOUSE",
                 "할당 창고 변경",

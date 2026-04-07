@@ -1,6 +1,7 @@
 package com.oms.collector.agent;
 
 import com.oms.collector.entity.Order;
+import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.ZoneId;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -175,6 +177,54 @@ public class OmsAgentToolService {
         );
     }
 
+    public Map<String, Object> getTopProductsByChannel(LocalDate startDate, LocalDate endDate, String channelKeyword, Integer limit) {
+        int safeLimit = Math.min(Math.max(limit == null ? 3 : limit, 1), 10);
+        LocalDateTime start = startDate.atStartOfDay();
+        LocalDateTime end = endDate.atTime(23, 59, 59);
+
+        List<Order> orders = orderRepository.findByDateRange(start, end).stream()
+            .filter(order -> {
+                String channelName = order.getChannel() != null ? nullable(order.getChannel().getChannelName()) : "";
+                return channelKeyword == null || channelKeyword.isBlank()
+                    || channelName.toLowerCase(Locale.ROOT).contains(channelKeyword.toLowerCase(Locale.ROOT));
+            })
+            .toList();
+
+        Map<String, ProductSummary> summaryMap = new LinkedHashMap<>();
+        for (Order order : orders) {
+            for (OrderItem item : order.getItems()) {
+                String productName = nullable(item.getProductName()).isBlank() ? "상품명 없음" : item.getProductName().trim();
+                ProductSummary summary = summaryMap.computeIfAbsent(productName, key -> new ProductSummary());
+                summary.quantity += item.getQuantity() != null ? item.getQuantity() : 0;
+                summary.orderNos.add(nullable(order.getOrderNo()));
+            }
+        }
+
+        List<Map<String, Object>> products = summaryMap.entrySet().stream()
+            .sorted((a, b) -> {
+                int quantityCompare = Integer.compare(b.getValue().quantity, a.getValue().quantity);
+                if (quantityCompare != 0) {
+                    return quantityCompare;
+                }
+                return Integer.compare(b.getValue().orderNos.size(), a.getValue().orderNos.size());
+            })
+            .limit(safeLimit)
+            .map(entry -> Map.<String, Object>of(
+                "productName", entry.getKey(),
+                "quantity", entry.getValue().quantity,
+                "orderCount", entry.getValue().orderNos.size()
+            ))
+            .toList();
+
+        return Map.of(
+            "startDate", startDate.toString(),
+            "endDate", endDate.toString(),
+            "channelKeyword", nullable(channelKeyword),
+            "orderCount", orders.size(),
+            "products", products
+        );
+    }
+
     public Map<String, Object> executeTool(String name, Map<String, Object> args) {
         return switch (name) {
             case "get_order_overview" -> getOrderOverview(stringArg(args, "period", "7d"));
@@ -187,6 +237,12 @@ public class OmsAgentToolService {
             case "search_products" -> searchProducts(
                 stringArg(args, "keyword", ""),
                 intArg(args, "limit", 10)
+            );
+            case "get_top_products_by_channel" -> getTopProductsByChannel(
+                LocalDate.parse(stringArg(args, "startDate", LocalDate.now(OMS_ZONE).minusDays(29).toString())),
+                LocalDate.parse(stringArg(args, "endDate", LocalDate.now(OMS_ZONE).toString())),
+                stringArg(args, "channelKeyword", ""),
+                intArg(args, "limit", 3)
             );
             default -> {
                 Map<String, Object> error = new LinkedHashMap<>();
@@ -251,5 +307,10 @@ public class OmsAgentToolService {
 
     private String nullable(String value) {
         return value != null ? value : "";
+    }
+
+    private static class ProductSummary {
+        private int quantity;
+        private final LinkedHashSet<String> orderNos = new LinkedHashSet<>();
     }
 }

@@ -22,6 +22,7 @@ import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Year;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -247,6 +248,23 @@ public class OmsAgentService {
                 }
                 """
         ));
+        tools.add(functionTool(
+            "get_top_products_by_channel",
+            "특정 기간과 판매처 기준으로 주문량이 많은 상품 상위 목록을 조회한다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {
+                    "startDate": { "type": "string" },
+                    "endDate": { "type": "string" },
+                    "channelKeyword": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+                  },
+                  "required": ["startDate", "endDate", "channelKeyword"],
+                  "additionalProperties": false
+                }
+                """
+        ));
         return tools;
     }
 
@@ -271,6 +289,12 @@ public class OmsAgentService {
             case "search_products" -> toolService.searchProducts(
                 args.path("keyword").asText(""),
                 args.has("limit") ? args.path("limit").asInt(10) : 10
+            );
+            case "get_top_products_by_channel" -> toolService.getTopProductsByChannel(
+                LocalDate.parse(args.path("startDate").asText(LocalDate.now().minusDays(29).toString())),
+                LocalDate.parse(args.path("endDate").asText(LocalDate.now().toString())),
+                args.path("channelKeyword").asText(""),
+                args.has("limit") ? args.path("limit").asInt(3) : 3
             );
             default -> {
                 Map<String, Object> error = new LinkedHashMap<>();
@@ -358,6 +382,38 @@ public class OmsAgentService {
             return new AgentChatResponse(true, appendActionGuide(formatRecentOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
+        if (containsAny(message, "송장 미입력", "송장 없는", "송장 누락", "송장 안 들어간")) {
+            Map<String, Object> result = toolService.searchOrders("", "CONFIRMED", 20);
+            toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "CONFIRMED", "limit", 20)));
+            return new AgentChatResponse(true, appendActionGuide(formatInvoiceMissingOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        ProductRankingRequest productRankingRequest = parseProductRankingRequest(message);
+        if (productRankingRequest != null) {
+            Map<String, Object> result = toolService.getTopProductsByChannel(
+                productRankingRequest.startDate(),
+                productRankingRequest.endDate(),
+                productRankingRequest.channelKeyword(),
+                productRankingRequest.limit()
+            );
+            toolCalls.add(Map.of(
+                "name", "get_top_products_by_channel",
+                "arguments", Map.of(
+                    "startDate", productRankingRequest.startDate().toString(),
+                    "endDate", productRankingRequest.endDate().toString(),
+                    "channelKeyword", productRankingRequest.channelKeyword(),
+                    "limit", productRankingRequest.limit()
+                )));
+            return new AgentChatResponse(true, formatTopProductsByChannel(result, productRankingRequest), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        String productKeyword = extractProductKeyword(message);
+        if (productKeyword != null) {
+            Map<String, Object> result = toolService.searchProducts(productKeyword, 10);
+            toolCalls.add(Map.of("name", "search_products", "arguments", Map.of("keyword", productKeyword, "limit", 10)));
+            return new AgentChatResponse(true, formatProductSearchResult(productKeyword, result), model, true, proposedAction, toolCalls, warnings);
+        }
+
         String orderSearchKeyword = extractOrderSearchKeyword(message);
         if (orderSearchKeyword != null) {
             Map<String, Object> result = toolService.searchOrders(orderSearchKeyword, "ALL", 20);
@@ -375,7 +431,10 @@ public class OmsAgentService {
         if (containsAny(message, "재고 요약", "재고 현황", "재고 부족")) {
             Map<String, Object> result = toolService.getInventoryOverview();
             toolCalls.add(Map.of("name", "get_inventory_overview", "arguments", Map.of()));
-            return new AgentChatResponse(true, appendActionGuide(formatInventory(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
+            String answer = containsAny(message, "부족", "위험", "품절")
+                ? formatInventoryRisk(result)
+                : formatInventory(result);
+            return new AgentChatResponse(true, appendActionGuide(answer, proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
         return null;
@@ -436,6 +495,9 @@ public class OmsAgentService {
         if (containsAny(normalized, "주문 현황", "주문 요약", "주문 상태", "최근 주문", "오늘 주문", "일주일", "7일", "한달", "30일")) {
             return null;
         }
+        if (containsAny(normalized, "상품", "제품", "재고")) {
+            return null;
+        }
 
         String keyword = normalized
             .replace("주문번호", " ")
@@ -453,6 +515,89 @@ public class OmsAgentService {
             .trim();
 
         return keyword.isBlank() ? null : keyword;
+    }
+
+    private String extractProductKeyword(String message) {
+        if (!containsAny(message, "상품", "제품", "sku", "바코드")) {
+            return null;
+        }
+        if (!containsAny(message, "찾아", "조회", "검색")) {
+            return null;
+        }
+
+        String keyword = message.trim()
+            .replace("상품명", " ")
+            .replace("상품", " ")
+            .replace("제품", " ")
+            .replace("sku", " ")
+            .replace("바코드", " ")
+            .replace("찾아줘", " ")
+            .replace("찾아 봐", " ")
+            .replace("찾아봐", " ")
+            .replace("조회해줘", " ")
+            .replace("조회", " ")
+            .replace("검색해줘", " ")
+            .replace("검색", " ")
+            .replace("해줘", " ")
+            .trim();
+
+        return keyword.isBlank() ? null : keyword;
+    }
+
+    private ProductRankingRequest parseProductRankingRequest(String message) {
+        if (!containsAny(message, "상품", "제품")) {
+            return null;
+        }
+        if (!containsAny(message, "많은", "상위", "많이", "top")) {
+            return null;
+        }
+        if (!containsAny(message, "판매처", "네이버", "스마트스토어", "11번가")) {
+            return null;
+        }
+
+        String channelKeyword = detectChannelKeyword(message);
+        if (channelKeyword == null) {
+            return null;
+        }
+
+        LocalDate now = LocalDate.now();
+        LocalDate startDate = now.minusDays(29);
+        LocalDate endDate = now;
+
+        if (message.contains("한달") || message.contains("한 달") || message.contains("30일")) {
+            startDate = now.minusDays(29);
+        } else if (message.contains("일주일") || message.contains("7일") || message.contains("주간")) {
+            startDate = now.minusDays(6);
+        }
+
+        for (int month = 1; month <= 12; month++) {
+            if (message.contains(month + "월")) {
+                int year = Year.now().getValue();
+                startDate = LocalDate.of(year, month, 1);
+                endDate = startDate.withDayOfMonth(startDate.lengthOfMonth());
+                break;
+            }
+        }
+
+        int limit = 3;
+        for (int top = 10; top >= 1; top--) {
+            if (message.contains(top + "개") || message.contains(top + "개만") || message.contains(top + "개 알려")) {
+                limit = top;
+                break;
+            }
+        }
+
+        return new ProductRankingRequest(startDate, endDate, channelKeyword, limit);
+    }
+
+    private String detectChannelKeyword(String message) {
+        if (containsAny(message, "네이버", "스마트스토어")) {
+            return "네이버";
+        }
+        if (message.contains("11번가")) {
+            return "11번가";
+        }
+        return null;
     }
 
     private String formatOverview(Map<String, Object> result) {
@@ -524,6 +669,23 @@ public class OmsAgentService {
         );
     }
 
+    @SuppressWarnings("unchecked")
+    private String formatInventoryRisk(Map<String, Object> result) {
+        List<Map<String, Object>> products = (List<Map<String, Object>>) result.getOrDefault("riskProducts", List.of());
+        if (products.isEmpty()) {
+            return "재고 위험 상품이 없습니다.";
+        }
+        String lines = products.stream()
+            .limit(5)
+            .map(product -> "- %s: 사용 가능 %s개".formatted(
+                valueOrDash(product.get("productName")),
+                product.getOrDefault("availableStock", 0)
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+        return "재고 부족 위험 상품 상위 5개입니다.\n" + lines;
+    }
+
     private String formatRecentOrders(Map<String, Object> result) {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
@@ -571,6 +733,87 @@ public class OmsAgentService {
             '%s' 검색 결과 %s건입니다.
             %s
             """.formatted(keyword, result.getOrDefault("count", orders.size()), lines);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatProductSearchResult(String keyword, Map<String, Object> result) {
+        List<Map<String, Object>> products = (List<Map<String, Object>>) result.getOrDefault("products", List.of());
+        if (products.isEmpty()) {
+            return """
+                '%s' 상품 검색 결과가 없습니다.
+                - 상품명, SKU, 바코드를 더 짧게 넣어 다시 조회해 주세요.
+                """.formatted(keyword);
+        }
+
+        String lines = products.stream()
+            .limit(3)
+            .map(product -> "- %s / 사용 가능 %s개 / SKU %s".formatted(
+                valueOrDash(product.get("productName")),
+                product.getOrDefault("availableStock", 0),
+                valueOrDash(product.get("sku"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+
+        return """
+            '%s' 상품 검색 결과 %s건입니다.
+            %s
+            """.formatted(keyword, result.getOrDefault("count", products.size()), lines);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatInvoiceMissingOrders(Map<String, Object> result) {
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+        List<Map<String, Object>> missing = orders.stream()
+            .filter(order -> !Boolean.TRUE.equals(order.get("invoiceEntered")))
+            .limit(5)
+            .toList();
+
+        if (missing.isEmpty()) {
+            return "최근 확인된 송장 미입력 주문이 없습니다.";
+        }
+
+        String lines = missing.stream()
+            .map(order -> "- %s / %s / %s".formatted(
+                valueOrDash(order.get("orderNo")),
+                valueOrDash(order.get("recipientName")),
+                formatDateTime(order.get("orderedAt"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+
+        return "송장 미입력 주문 상위 %s건입니다.\n%s".formatted(missing.size(), lines);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatTopProductsByChannel(Map<String, Object> result, ProductRankingRequest request) {
+        List<Map<String, Object>> products = (List<Map<String, Object>>) result.getOrDefault("products", List.of());
+        if (products.isEmpty()) {
+            return """
+                %s 판매처에서 %s 기간에 집계된 상품 데이터가 없습니다.
+                - 판매처명이나 기간을 바꿔 다시 조회해 주세요.
+                """.formatted(channelDisplayName(request.channelKeyword()), periodLabel(request.startDate(), request.endDate()));
+        }
+
+        String lines = products.stream()
+            .limit(request.limit())
+            .map((product) -> "- %s: 주문수량 %s개, 주문건수 %s건".formatted(
+                valueOrDash(product.get("productName")),
+                product.getOrDefault("quantity", 0),
+                product.getOrDefault("orderCount", 0)
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+
+        return """
+            %s 판매처에서 %s 기간 주문량이 많은 상품 상위 %s개입니다.
+            %s
+            """.formatted(
+            channelDisplayName(request.channelKeyword()),
+            periodLabel(request.startDate(), request.endDate()),
+            request.limit(),
+            lines
+        );
     }
 
     @SuppressWarnings("unchecked")
@@ -645,4 +888,28 @@ public class OmsAgentService {
         }
         return answer + "\n\n실행 준비\n- 요청한 작업: " + proposedAction.title() + "\n- 아래 승인 버튼을 누르면 실제 처리됩니다.";
     }
+
+    private String channelDisplayName(String channelKeyword) {
+        if ("네이버".equals(channelKeyword)) {
+            return "네이버";
+        }
+        if ("11번가".equals(channelKeyword)) {
+            return "11번가";
+        }
+        return channelKeyword;
+    }
+
+    private String periodLabel(LocalDate startDate, LocalDate endDate) {
+        if (startDate.getDayOfMonth() == 1 && endDate.getDayOfMonth() == endDate.lengthOfMonth() && startDate.getMonth() == endDate.getMonth()) {
+            return startDate.getMonthValue() + "월";
+        }
+        return startDate + " ~ " + endDate;
+    }
+
+    private record ProductRankingRequest(
+        LocalDate startDate,
+        LocalDate endDate,
+        String channelKeyword,
+        int limit
+    ) {}
 }

@@ -196,6 +196,7 @@ public class AgentExportService {
             case "search_orders" -> "주문 검색";
             case "get_inventory_overview" -> "재고 현황 조회";
             case "search_products" -> "상품 검색";
+            case "get_top_products_by_channel" -> "판매처 인기 상품 조회";
             default -> name;
         };
     }
@@ -233,6 +234,9 @@ public class AgentExportService {
             case "outOfStockCount" -> "품절 상품 수";
             case "riskProducts" -> "위험 상품";
             case "products" -> "상품 목록";
+            case "orderCount" -> "주문 건수";
+            case "quantity" -> "주문 수량";
+            case "channelKeyword" -> "판매처";
             case "productName" -> "상품명";
             case "sku" -> "SKU";
             case "barcode" -> "바코드";
