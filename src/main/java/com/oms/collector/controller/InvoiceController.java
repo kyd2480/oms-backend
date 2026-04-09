@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
@@ -39,6 +40,8 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class InvoiceController {
+    private static final String INVOICE_PREFIX = "INVOICE:";
+    private static final String MESSAGE_PREFIX = "MESSAGE_B64:";
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
@@ -85,6 +88,7 @@ public class InvoiceController {
         public String carrierCode;           // 택배사 코드
         public String carrierName;           // 택배사명
         public String trackingNo;            // 송장번호
+        public String deliveryMessage;       // 배송메시지
         public boolean hasInvoice;           // 송장 입력 여부
         public List<OrderItemDTO> items;     // ★ 개별 상품 목록 (옵션·바코드 포함)
 
@@ -110,12 +114,18 @@ public class InvoiceController {
         }
 
         private void parseInvoiceFromMemo(String memo) {
-            if (memo == null || !memo.startsWith("INVOICE:")) {
+            this.deliveryMessage = extractDeliveryMessage(memo);
+            if (memo == null || !memo.contains(INVOICE_PREFIX)) {
                 this.hasInvoice = false;
                 return;
             }
             try {
-                String[] parts = memo.substring(8).split("\\|");
+                String invoiceSegment = extractInvoiceSegment(memo);
+                if (invoiceSegment == null || invoiceSegment.isBlank()) {
+                    this.hasInvoice = false;
+                    return;
+                }
+                String[] parts = invoiceSegment.split("\\|");
                 for (String part : parts) {
                     String[] kv = part.split(":", 2);
                     if (kv.length == 2) {
@@ -129,6 +139,60 @@ public class InvoiceController {
                 this.hasInvoice = false;
             }
         }
+    }
+
+    private static String extractInvoiceSegment(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return null;
+        }
+        int invoiceIndex = memo.indexOf(INVOICE_PREFIX);
+        if (invoiceIndex < 0) {
+            return null;
+        }
+        return memo.substring(invoiceIndex + INVOICE_PREFIX.length());
+    }
+
+    private static String extractDeliveryMessage(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return "";
+        }
+        int messageIndex = memo.indexOf(MESSAGE_PREFIX);
+        if (messageIndex >= 0) {
+            int endIndex = memo.indexOf('|', messageIndex);
+            String encoded = endIndex >= 0
+                ? memo.substring(messageIndex + MESSAGE_PREFIX.length(), endIndex)
+                : memo.substring(messageIndex + MESSAGE_PREFIX.length());
+            try {
+                return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                log.warn("배송메시지 디코딩 실패: {}", encoded);
+                return "";
+            }
+        }
+        if (memo.contains(INVOICE_PREFIX)) {
+            return "";
+        }
+        return memo;
+    }
+
+    private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName, String trackingNo) {
+        String deliveryMessage = extractDeliveryMessage(existingMemo);
+        List<String> parts = new ArrayList<>();
+        if (!deliveryMessage.isBlank()) {
+            parts.add(MESSAGE_PREFIX + Base64.getUrlEncoder().encodeToString(deliveryMessage.getBytes(StandardCharsets.UTF_8)));
+        }
+        parts.add(
+            INVOICE_PREFIX +
+            "CARRIER:" + Objects.toString(carrierCode, "") +
+            "|CARRIER_NAME:" + Objects.toString(carrierName, "") +
+            "|TRACKING:" + Objects.toString(trackingNo, "")
+        );
+        return String.join("|", parts);
+    }
+
+    private static String removeInvoiceFromMemo(String memo) {
+        String deliveryMessage = extractDeliveryMessage(memo);
+        return deliveryMessage.isBlank() ? null : deliveryMessage;
     }
 
     /**
@@ -202,11 +266,7 @@ public class InvoiceController {
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
         // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(
-            "INVOICE:CARRIER:" + carrierCode +
-            "|CARRIER_NAME:" + carrierName +
-            "|TRACKING:" + trackingNo
-        );
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
         orderRepository.save(order);
 
         log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -233,11 +293,7 @@ public class InvoiceController {
                 if (orderNo == null || trackingNo == null || trackingNo.isBlank()) { failed++; continue; }
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
-                order.setDeliveryMemo(
-                    "INVOICE:CARRIER:" + carrierCode +
-                    "|CARRIER_NAME:" + carrierName +
-                    "|TRACKING:" + trackingNo
-                );
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -302,11 +358,7 @@ public class InvoiceController {
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
         String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
-        order.setDeliveryMemo(
-            "INVOICE:CARRIER:" + carrierCode +
-            "|CARRIER_NAME:" + carrierName +
-            "|TRACKING:" + trackingNo
-        );
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
         orderRepository.save(order);
 
         log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -342,13 +394,9 @@ public class InvoiceController {
         int assigned = 0;
         for (Order order : orders) {
             // 이미 송장 있으면 스킵
-            if (order.getDeliveryMemo() != null && order.getDeliveryMemo().startsWith("INVOICE:")) continue;
+            if (extractInvoiceSegment(order.getDeliveryMemo()) != null) continue;
             String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
-            order.setDeliveryMemo(
-                "INVOICE:CARRIER:" + carrierCode +
-                "|CARRIER_NAME:" + carrierName +
-                "|TRACKING:" + trackingNo
-            );
+            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
             orderRepository.save(order);
             assigned++;
         }
@@ -494,7 +542,7 @@ public class InvoiceController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        order.setDeliveryMemo(null);
+        order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
         orderRepository.save(order);
         log.info("송장삭제: {}", orderNo);
         return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
