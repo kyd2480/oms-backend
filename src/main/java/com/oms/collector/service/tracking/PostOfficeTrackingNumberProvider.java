@@ -47,6 +47,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
     private static final String APPROVAL_API_PATH = "/api.GetApprNo.jparcel";
     private static final String OFFICE_INFO_API_PATH = "/api.GetOfficeInfo.jparcel";
     private static final String INSERT_ORDER_API_PATH = "/api.InsertOrder.jparcel";
+    private static final String CANCEL_ORDER_API_PATH = "/api.GetResCancelCmd.jparcel";
     private static final String DEFAULT_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/17)";
 
     private final OrderRepository orderRepository;
@@ -108,6 +109,28 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         }
         log.info("[우체국 API] 송장번호 발급 요청: orderNo={}", orderNo);
         return issueFromApi(orderNo);
+    }
+
+    @Override
+    public void cancel(String carrierCode, String carrierName, String orderNo, String trackingNo) {
+        if (!"POST".equals(carrierCode)) {
+            throw new UnsupportedOperationException(
+                "PostOfficeTrackingNumberProvider는 우체국(POST)만 지원합니다. 요청 택배사: " + carrierCode
+            );
+        }
+        validateConfiguration();
+        requireText(trackingNo, "trackingNo");
+
+        String resolvedApprNo = StringUtils.hasText(contractApprovalNo) ? contractApprovalNo : fetchApprovalNumber();
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("custNo", customerNo);
+        fields.put("apprNo", resolvedApprNo);
+        fields.put("reqType", "1");
+        fields.put("regiNo", trackingNo);
+
+        String xml = invokeApi(CANCEL_ORDER_API_PATH, encrypt(buildQueryString(fields)));
+        ensureNoApiError(xml);
+        log.info("[우체국 API] 송장번호 취소 완료: orderNo={}, trackingNo={}", orderNo, trackingNo);
     }
 
     private String issueFromApi(String orderNo) {

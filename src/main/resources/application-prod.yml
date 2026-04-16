@@ -27,7 +27,9 @@ spring:
   
   # 프로덕션 데이터베이스 (Railway PostgreSQL)
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/railway}
+    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE:railway}}}
+    username: ${SPRING_DATASOURCE_USERNAME:${PGUSER:postgres}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${PGPASSWORD:postgres}}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10          # 풀 크기 증가
@@ -38,6 +40,10 @@ spring:
       leak-detection-threshold: 120000  # 누수 감지 2분
       connection-test-query: "SELECT 1"
       auto-commit: true              # 자동 커밋 활성화
+      data-source-properties:
+        sslmode: ${DB_SSL_MODE:${PGSSLMODE:require}}
+        connectTimeout: ${DB_CONNECT_TIMEOUT:60}
+        socketTimeout: ${DB_SOCKET_TIMEOUT:60}
   
   # JPA 설정
   jpa:
@@ -47,7 +53,6 @@ spring:
     properties:
       hibernate:
         format_sql: false
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
           batch_size: 100              # 배치 크기 증가

@@ -48,6 +48,8 @@ public class InvoiceController {
     private final InventoryService inventoryService;
     private final TrackingNumberProvider trackingNumberProvider;
 
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
+
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
         Map.of("code", "CJ",      "name", "CJ대한통운"),
@@ -193,6 +195,43 @@ public class InvoiceController {
     private static String removeInvoiceFromMemo(String memo) {
         String deliveryMessage = extractDeliveryMessage(memo);
         return deliveryMessage.isBlank() ? null : deliveryMessage;
+    }
+
+    private static InvoiceInfo extractInvoiceInfo(String memo) {
+        String invoiceSegment = extractInvoiceSegment(memo);
+        if (invoiceSegment == null || invoiceSegment.isBlank()) {
+            return null;
+        }
+
+        String carrierCode = null;
+        String carrierName = null;
+        String trackingNo = null;
+        for (String part : invoiceSegment.split("\\|")) {
+            String[] kv = part.split(":", 2);
+            if (kv.length != 2) {
+                continue;
+            }
+            if ("CARRIER".equals(kv[0])) carrierCode = kv[1];
+            if ("CARRIER_NAME".equals(kv[0])) carrierName = kv[1];
+            if ("TRACKING".equals(kv[0])) trackingNo = kv[1];
+        }
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
+    }
+
+    private void cancelCarrierInvoiceIfNeeded(Order order) {
+        InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+        if (invoiceInfo == null || invoiceInfo.trackingNo() == null || invoiceInfo.trackingNo().isBlank()) {
+            return;
+        }
+        if (invoiceInfo.carrierCode() == null || invoiceInfo.carrierCode().isBlank()) {
+            return;
+        }
+        trackingNumberProvider.cancel(
+            invoiceInfo.carrierCode(),
+            invoiceInfo.carrierName(),
+            order.getOrderNo(),
+            invoiceInfo.trackingNo()
+        );
     }
 
     /**
@@ -464,6 +503,7 @@ public class InvoiceController {
         }
 
         order.getItems().size();
+        cancelCarrierInvoiceIfNeeded(order);
 
         // 발송 시 사용된 창고 코드
         String warehouseCode = AllocationController.getCurrentWarehouseCode();
@@ -542,6 +582,7 @@ public class InvoiceController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
+        cancelCarrierInvoiceIfNeeded(order);
         order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
         orderRepository.save(order);
         log.info("송장삭제: {}", orderNo);

@@ -24,6 +24,20 @@ public interface TrackingNumberProvider {
     String issue(String carrierCode, String carrierName, String orderNo);
 
     /**
+     * 송장번호 취소
+     *
+     * @param carrierCode 택배사 코드
+     * @param carrierName 택배사명
+     * @param orderNo     주문번호
+     * @param trackingNo  현재 송장번호
+     */
+    default void cancel(String carrierCode, String carrierName, String orderNo, String trackingNo) {
+        if (!supports(carrierCode)) {
+            throw new UnsupportedOperationException("해당 택배사 송장취소를 지원하지 않습니다: " + carrierCode);
+        }
+    }
+
+    /**
      * 해당 택배사를 지원하는지 여부
      * - false 반환 시 Mock 폴백 또는 예외 처리
      */

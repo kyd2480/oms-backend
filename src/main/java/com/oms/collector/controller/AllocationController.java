@@ -33,6 +33,9 @@ import java.util.*;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class AllocationController {
+    private static final String INVOICE_PREFIX = "INVOICE:";
+
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
     private final OrderRepository   orderRepository;
     private final ProductRepository productRepository;
@@ -116,6 +119,21 @@ public class AllocationController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
+        if (order.getOrderStatus() != Order.OrderStatus.CONFIRMED) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "CONFIRMED 상태 주문만 검수출고할 수 있습니다: " + order.getOrderStatus()
+            ));
+        }
+
+        InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+        if (invoiceInfo == null || invoiceInfo.trackingNo() == null || invoiceInfo.trackingNo().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "송장출력 페이지에서 송장번호를 먼저 발급한 뒤 검수출고할 수 있습니다"
+            ));
+        }
+
         order.getItems().size();
 
         for (OrderItem item : order.getItems()) {
@@ -176,5 +194,30 @@ public class AllocationController {
             .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
                       || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
             .findFirst().orElse(found.isEmpty() ? null : found.get(0));
+    }
+
+    private static InvoiceInfo extractInvoiceInfo(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return null;
+        }
+        int invoiceIndex = memo.indexOf(INVOICE_PREFIX);
+        if (invoiceIndex < 0) {
+            return null;
+        }
+
+        String carrierCode = null;
+        String carrierName = null;
+        String trackingNo = null;
+        String invoiceSegment = memo.substring(invoiceIndex + INVOICE_PREFIX.length());
+        for (String part : invoiceSegment.split("\\|")) {
+            String[] kv = part.split(":", 2);
+            if (kv.length != 2) {
+                continue;
+            }
+            if ("CARRIER".equals(kv[0])) carrierCode = kv[1];
+            if ("CARRIER_NAME".equals(kv[0])) carrierName = kv[1];
+            if ("TRACKING".equals(kv[0])) trackingNo = kv[1];
+        }
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
     }
 }

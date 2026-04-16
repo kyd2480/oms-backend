@@ -42,4 +42,9 @@ public class MockTrackingNumberProvider implements TrackingNumberProvider {
         log.info("[Mock] 송장번호 발급: {} → {} ({})", orderNo, trackingNo, carrierName);
         return trackingNo;
     }
+
+    @Override
+    public void cancel(String carrierCode, String carrierName, String orderNo, String trackingNo) {
+        log.info("[Mock] 송장번호 취소: {} → {} ({})", orderNo, trackingNo, carrierName);
+    }
 }
