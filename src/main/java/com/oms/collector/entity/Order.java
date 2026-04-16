@@ -98,6 +98,19 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", length = 20)
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "market_sync_status", length = 20)
+    private MarketSyncStatus marketSyncStatus = MarketSyncStatus.NOT_REQUIRED;
+
+    @Column(name = "market_sync_message", columnDefinition = "TEXT")
+    private String marketSyncMessage;
+
+    @Column(name = "market_sync_attempted_at")
+    private LocalDateTime marketSyncAttemptedAt;
+
+    @Column(name = "market_synced_at")
+    private LocalDateTime marketSyncedAt;
     
     // 날짜
     @Column(name = "ordered_at", nullable = false)
@@ -135,6 +148,13 @@ public class Order {
         PAID,         // 결제완료
         CANCELLED,    // 취소
         REFUNDED      // 환불
+    }
+
+    public enum MarketSyncStatus {
+        NOT_REQUIRED,
+        PENDING,
+        SUCCESS,
+        FAILED
     }
     
     // Business Methods

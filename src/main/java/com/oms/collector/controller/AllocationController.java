@@ -6,6 +6,7 @@ import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.market.MarketShipmentSyncService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -40,6 +41,7 @@ public class AllocationController {
     private final OrderRepository   orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService  inventoryService;
+    private final MarketShipmentSyncService marketShipmentSyncService;
 
     // ─── 인메모리 창고 설정 저장 (간단한 구현) ────────────────
     // 실제 운영 시 DB 테이블로 관리 권장
@@ -155,7 +157,19 @@ public class AllocationController {
         order.setOrderStatus(Order.OrderStatus.SHIPPED);
         orderRepository.save(order);
 
-        return ResponseEntity.ok(Map.of("success", true, "message", "재고 차감 및 발송 처리 완료"));
+        MarketShipmentSyncService.MarketShipmentSyncResult syncResult = marketShipmentSyncService.syncShipment(
+            order,
+            invoiceInfo.carrierCode(),
+            invoiceInfo.carrierName(),
+            invoiceInfo.trackingNo()
+        );
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "재고 차감 및 발송 처리 완료",
+            "marketSyncSuccess", syncResult.success(),
+            "marketSyncMessage", syncResult.message()
+        ));
     }
 
     /**
