@@ -78,10 +78,22 @@ collector:
     max-attempts: 3
     delay: 5000  # 5초
 
-# 배송조회 설정
-delivery:
+tracking:
+  provider: ${TRACKING_PROVIDER:mock}
   post-office:
-    api-key: fa54da790c9a4f4c291d48ee1f430d2de79b7942bbad6cde726902dc6659a25e
+    base-url: ${POST_OFFICE_BASE_URL:http://ship.epost.go.kr}
+    auth-key: ${POST_OFFICE_AUTH_KEY:}
+    seed-key: ${POST_OFFICE_SEED_KEY:}
+    customer-no: ${POST_OFFICE_CUSTOMER_NO:}
+    contract-approval-no: ${POST_OFFICE_CONTRACT_APPROVAL_NO:}
+    office-ser: ${POST_OFFICE_OFFICE_SER:}
+    order-company-name: ${POST_OFFICE_ORDER_COMPANY_NAME:OMS}
+    inquiry-tel: ${POST_OFFICE_INQUIRY_TEL:}
+    content-code: ${POST_OFFICE_CONTENT_CODE:029}
+    default-weight: ${POST_OFFICE_DEFAULT_WEIGHT:1}
+    default-volume: ${POST_OFFICE_DEFAULT_VOLUME:60}
+    print-yn: ${POST_OFFICE_PRINT_YN:N}
+    test-yn: ${POST_OFFICE_TEST_YN:N}
 
 openai:
   api-key: ${OPENAI_API_KEY:}

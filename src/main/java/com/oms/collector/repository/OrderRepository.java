@@ -1,6 +1,7 @@
 package com.oms.collector.repository;
 
 import com.oms.collector.entity.Order;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,6 +15,10 @@ import java.util.UUID;
 public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByOrderNo(String orderNo);
+
+    @EntityGraph(attributePaths = {"items", "channel"})
+    Optional<Order> findWithItemsByOrderNo(String orderNo);
+
     Optional<Order> findFirstByOrderByOrderedAtDesc();
 
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
