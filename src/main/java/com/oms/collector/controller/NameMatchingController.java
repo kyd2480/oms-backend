@@ -48,6 +48,7 @@ public class NameMatchingController {
         public String channelName;
         public String recipientName;
         public String channelProductName; // 쇼핑몰 상품명
+        public String optionName;
         public String productCode;
         public int    quantity;
         public String suggestedProductId;   // 자동 추천 상품 ID
@@ -61,6 +62,7 @@ public class NameMatchingController {
             this.channelName         = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName       = o.getRecipientName();
             this.channelProductName  = item.getProductName();
+            this.optionName          = item.getOptionName();
             this.productCode         = item.getProductCode();
             this.quantity            = item.getQuantity() != null ? item.getQuantity() : 0;
             this.matchStatus         = "UNMATCHED";
