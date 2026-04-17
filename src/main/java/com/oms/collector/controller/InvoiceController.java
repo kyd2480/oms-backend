@@ -68,12 +68,18 @@ public class InvoiceController {
         public String option;       // 옵션 (색상/사이즈 등)
         public String barcode;      // 바코드 (추후 OrderItem 엔티티에 필드 추가 시 활성화)
         public int    quantity;     // 수량
+        public int    originalQuantity;
+        public int    cancelledQuantity;
+        public String itemStatus;
 
         public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
             this.productName = i.getProductName();
             this.option      = i.getOptionName() != null ? i.getOptionName() : "";
             this.barcode     = i.getProductCode() != null ? i.getProductCode() : "";  // product_code = 바코드
-            this.quantity    = i.getQuantity()   != null ? i.getQuantity()   : 1;
+            this.quantity    = i.getActiveQuantity();
+            this.originalQuantity = i.getQuantity() != null ? i.getQuantity() : 1;
+            this.cancelledQuantity = i.getCancelledQuantity() != null ? i.getCancelledQuantity() : 0;
+            this.itemStatus = i.getItemStatus() != null ? i.getItemStatus().name() : "ACTIVE";
         }
     }
 
@@ -102,9 +108,8 @@ public class InvoiceController {
             this.address       = (o.getAddress() != null ? o.getAddress() : "")
                                + (o.getAddressDetail() != null ? " " + o.getAddressDetail() : "");
             this.productName   = o.getItems().isEmpty() ? "" :
-                o.getItems().stream().map(i -> i.getProductName()).collect(Collectors.joining(", "));
-            this.quantity      = o.getItems().stream()
-                .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
+                o.getItems().stream().filter(i -> i.getActiveQuantity() > 0).map(i -> i.getProductName()).collect(Collectors.joining(", "));
+            this.quantity      = o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
             this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             // 개별 상품 목록 (옵션·바코드 포함)

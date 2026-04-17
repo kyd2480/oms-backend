@@ -128,6 +128,13 @@ public class AllocationController {
             ));
         }
 
+        if (Boolean.TRUE.equals(order.getShippingHold())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "출고보류 주문입니다: " + (order.getHoldReason() != null ? order.getHoldReason() : "클레임 확인 필요")
+            ));
+        }
+
         InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
         if (invoiceInfo == null || invoiceInfo.trackingNo() == null || invoiceInfo.trackingNo().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -141,7 +148,8 @@ public class AllocationController {
         for (OrderItem item : order.getItems()) {
             Product product = findProduct(item);
             if (product == null) continue;
-            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            int qty = item.getActiveQuantity();
+            if (qty <= 0) continue;
             try {
                 inventoryService.processOutboundWithWarehouse(
                     product.getProductId(), qty, warehouseCode,
@@ -187,7 +195,8 @@ public class AllocationController {
         for (OrderItem item : order.getItems()) {
             Product product = findProduct(item);
             if (product == null) continue;
-            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            int qty = item.getActiveQuantity();
+            if (qty <= 0) continue;
             try {
                 inventoryService.releaseReservedStock(product.getProductId(), qty);
             } catch (Exception e) {

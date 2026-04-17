@@ -51,6 +51,18 @@ public class OrderItem {
     // 수량 및 가격
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
+
+    @Column(name = "cancelled_quantity", nullable = false)
+    @Builder.Default
+    private Integer cancelledQuantity = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "item_status", length = 20, nullable = false)
+    @Builder.Default
+    private ItemStatus itemStatus = ItemStatus.ACTIVE;
+
+    @Column(name = "cancel_reason", columnDefinition = "TEXT")
+    private String cancelReason;
     
     @Column(name = "unit_price", nullable = false, precision = 15, scale = 2)
     private BigDecimal unitPrice;
@@ -71,5 +83,31 @@ public class OrderItem {
     
     public boolean hasProductCode() {
         return this.productCode != null && !this.productCode.isBlank();
+    }
+
+    public int getActiveQuantity() {
+        int ordered = this.quantity != null ? this.quantity : 0;
+        int cancelled = this.cancelledQuantity != null ? this.cancelledQuantity : 0;
+        return Math.max(0, ordered - cancelled);
+    }
+
+    public void applyCancelledQuantity(int quantity, String reason) {
+        int ordered = this.quantity != null ? this.quantity : 0;
+        int nextCancelled = Math.min(ordered, Math.max(0, (this.cancelledQuantity != null ? this.cancelledQuantity : 0) + quantity));
+        this.cancelledQuantity = nextCancelled;
+        this.cancelReason = reason;
+        if (nextCancelled <= 0) {
+            this.itemStatus = ItemStatus.ACTIVE;
+        } else if (nextCancelled >= ordered) {
+            this.itemStatus = ItemStatus.CANCELLED;
+        } else {
+            this.itemStatus = ItemStatus.PARTIAL_CANCELLED;
+        }
+    }
+
+    public enum ItemStatus {
+        ACTIVE,
+        PARTIAL_CANCELLED,
+        CANCELLED
     }
 }

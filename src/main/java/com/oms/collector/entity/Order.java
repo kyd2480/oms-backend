@@ -111,6 +111,13 @@ public class Order {
 
     @Column(name = "market_synced_at")
     private LocalDateTime marketSyncedAt;
+
+    @Column(name = "shipping_hold", nullable = false)
+    @Builder.Default
+    private Boolean shippingHold = false;
+
+    @Column(name = "hold_reason", columnDefinition = "TEXT")
+    private String holdReason;
     
     // 날짜
     @Column(name = "ordered_at", nullable = false)

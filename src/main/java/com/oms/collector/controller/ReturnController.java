@@ -2,15 +2,22 @@ package com.oms.collector.controller;
 
 import com.oms.collector.entity.Product;
 import com.oms.collector.entity.ProductReturn;
+import com.oms.collector.entity.Order;
+import com.oms.collector.entity.OrderItem;
+import com.oms.collector.entity.SalesChannel;
+import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductReturnRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.OrderSequenceService;
 import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.repository.SalesChannelRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -36,6 +43,9 @@ public class ReturnController {
     private final ProductReturnRepository  returnRepository;
     private final InventoryService  inventoryService;
     private final ProductRepository productRepository;
+    private final OrderRepository orderRepository;
+    private final SalesChannelRepository salesChannelRepository;
+    private final OrderSequenceService orderSequenceService;
 
     /* ── DTO ─────────────────────────────────────────── */
 
@@ -436,12 +446,206 @@ public class ReturnController {
 
         ret.setResolutionType(ProductReturn.ResolutionType.valueOf(req.resolutionType));
         ret.setRefundAmount(req.refundAmount);
-        ret.setExchangeOrderNo(req.exchangeOrderNo);
         ret.setResolutionMemo(req.resolutionMemo);
+
+        if (ret.getResolutionType() == ProductReturn.ResolutionType.EXCHANGE) {
+            String exchangeOrderNo = createExchangeOrderIfNeeded(ret, req.exchangeOrderNo);
+            ret.setExchangeOrderNo(exchangeOrderNo);
+        } else {
+            ret.setExchangeOrderNo(req.exchangeOrderNo);
+        }
+
         ret.setStatus(ProductReturn.ReturnStatus.COMPLETED);
         ret.setCompletedAt(LocalDateTime.now());
 
         return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
+    }
+
+    private String createExchangeOrderIfNeeded(ProductReturn ret, String requestedExchangeOrderNo) {
+        if (ret.getExchangeOrderNo() != null && !ret.getExchangeOrderNo().isBlank()) {
+            return ret.getExchangeOrderNo();
+        }
+        if (requestedExchangeOrderNo != null && !requestedExchangeOrderNo.isBlank()) {
+            return requestedExchangeOrderNo;
+        }
+
+        Order sourceOrder = orderRepository.findWithItemsByOrderNo(ret.getOrderNo()).orElse(null);
+        String newOrderNo = orderSequenceService.generateOrderNo();
+
+        Order newOrder = Order.builder()
+            .orderNo(newOrderNo)
+            .rawOrder(null)
+            .channel(resolveChannel(ret, sourceOrder))
+            .channelOrderNo(buildExchangeChannelOrderNo(ret.getOrderNo(), newOrderNo))
+            .customerName(sourceOrder != null && sourceOrder.getCustomerName() != null ? sourceOrder.getCustomerName() : defaultString(ret.getRecipientName()))
+            .customerPhone(sourceOrder != null ? sourceOrder.getCustomerPhone() : ret.getRecipientPhone())
+            .customerEmail(sourceOrder != null ? sourceOrder.getCustomerEmail() : null)
+            .recipientName(sourceOrder != null ? sourceOrder.getRecipientName() : ret.getRecipientName())
+            .recipientPhone(sourceOrder != null ? sourceOrder.getRecipientPhone() : ret.getRecipientPhone())
+            .postalCode(sourceOrder != null ? sourceOrder.getPostalCode() : null)
+            .address(sourceOrder != null ? sourceOrder.getAddress() : "")
+            .addressDetail(sourceOrder != null ? sourceOrder.getAddressDetail() : null)
+            .deliveryMemo(buildExchangeDeliveryMemo(sourceOrder, ret))
+            .totalAmount(BigDecimal.ZERO)
+            .paymentAmount(BigDecimal.ZERO)
+            .shippingFee(BigDecimal.ZERO)
+            .discountAmount(BigDecimal.ZERO)
+            .orderStatus(Order.OrderStatus.PENDING)
+            .paymentStatus(Order.PaymentStatus.PAID)
+            .orderedAt(LocalDateTime.now())
+            .paidAt(LocalDateTime.now())
+            .build();
+
+        List<OrderItem> newItems = buildExchangeItems(ret, sourceOrder, newOrder);
+        if (newItems.isEmpty()) {
+            newItems.add(OrderItem.builder()
+                .order(newOrder)
+                .productCode("")
+                .channelProductCode("")
+                .productName(ret.getProductName() != null ? ret.getProductName() : "교환상품")
+                .optionName("")
+                .quantity(ret.getQuantity() != null ? ret.getQuantity() : 1)
+                .unitPrice(BigDecimal.ZERO)
+                .totalPrice(BigDecimal.ZERO)
+                .build());
+        }
+
+        newItems.forEach(newOrder::addItem);
+        BigDecimal total = newItems.stream()
+            .map(item -> item.getTotalPrice() != null ? item.getTotalPrice() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        newOrder.setTotalAmount(total);
+        newOrder.setPaymentAmount(total);
+
+        orderRepository.save(newOrder);
+        log.info("교환 재출고 주문 생성: returnId={} sourceOrder={} newOrder={}", ret.getReturnId(), ret.getOrderNo(), newOrderNo);
+        return newOrderNo;
+    }
+
+    private SalesChannel resolveChannel(ProductReturn ret, Order sourceOrder) {
+        if (sourceOrder != null && sourceOrder.getChannel() != null) {
+            return sourceOrder.getChannel();
+        }
+        if (ret.getChannelName() == null || ret.getChannelName().isBlank()) {
+            return null;
+        }
+        return salesChannelRepository.findFirstByChannelNameIgnoreCase(ret.getChannelName()).orElse(null);
+    }
+
+    private List<OrderItem> buildExchangeItems(ProductReturn ret, Order sourceOrder, Order newOrder) {
+        List<Map<String, Object>> requestItems = parseItemsJson(ret.getItemsJson());
+        if (requestItems.isEmpty() && sourceOrder == null) {
+            return new ArrayList<>();
+        }
+
+        List<OrderItem> sourceItems = sourceOrder != null ? sourceOrder.getItems() : List.of();
+        List<OrderItem> built = new ArrayList<>();
+
+        for (Map<String, Object> requested : requestItems) {
+            String productCode = asString(requested.get("productCode"));
+            String productName = asString(requested.get("productName"));
+            String optionName = asString(requested.get("optionName"));
+            int quantity = requested.get("quantity") instanceof Number
+                ? ((Number) requested.get("quantity")).intValue()
+                : 1;
+
+            OrderItem sourceItem = sourceItems.stream()
+                .filter(item -> matchesExchangeItem(item, productCode, productName, optionName))
+                .findFirst()
+                .orElse(null);
+
+            BigDecimal unitPrice = sourceItem != null && sourceItem.getUnitPrice() != null
+                ? sourceItem.getUnitPrice()
+                : BigDecimal.ZERO;
+
+            OrderItem newItem = OrderItem.builder()
+                .order(newOrder)
+                .productCode(sourceItem != null ? sourceItem.getProductCode() : productCode)
+                .channelProductCode(sourceItem != null ? sourceItem.getChannelProductCode() : productCode)
+                .productName(sourceItem != null ? sourceItem.getProductName() : defaultString(productName, ret.getProductName(), "교환상품"))
+                .optionName(sourceItem != null ? sourceItem.getOptionName() : optionName)
+                .quantity(quantity)
+                .unitPrice(unitPrice)
+                .totalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)))
+                .build();
+            built.add(newItem);
+        }
+
+        if (built.isEmpty() && sourceOrder != null) {
+            for (OrderItem sourceItem : sourceItems) {
+                int quantity = sourceItem.getQuantity() != null ? sourceItem.getQuantity() : 1;
+                built.add(OrderItem.builder()
+                    .order(newOrder)
+                    .productCode(sourceItem.getProductCode())
+                    .channelProductCode(sourceItem.getChannelProductCode())
+                    .productName(sourceItem.getProductName())
+                    .optionName(sourceItem.getOptionName())
+                    .quantity(quantity)
+                    .unitPrice(sourceItem.getUnitPrice() != null ? sourceItem.getUnitPrice() : BigDecimal.ZERO)
+                    .totalPrice(sourceItem.getTotalPrice() != null ? sourceItem.getTotalPrice() : BigDecimal.ZERO)
+                    .build());
+            }
+        }
+
+        return built;
+    }
+
+    private List<Map<String, Object>> parseItemsJson(String itemsJson) {
+        if (itemsJson == null || itemsJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.readValue(
+                itemsJson,
+                mapper.getTypeFactory().constructCollectionType(List.class, Map.class)
+            );
+        } catch (Exception e) {
+            log.warn("교환 itemsJson 파싱 실패: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private boolean matchesExchangeItem(OrderItem item, String productCode, String productName, String optionName) {
+        if (item == null) {
+            return false;
+        }
+        boolean codeMatch = productCode != null && !productCode.isBlank() && (
+            productCode.equalsIgnoreCase(defaultString(item.getProductCode()))
+                || productCode.equalsIgnoreCase(defaultString(item.getChannelProductCode()))
+        );
+        boolean nameMatch = productName != null && !productName.isBlank()
+            && productName.equalsIgnoreCase(defaultString(item.getProductName()));
+        boolean optionMatch = optionName == null || optionName.isBlank()
+            || optionName.equalsIgnoreCase(defaultString(item.getOptionName()));
+        return (codeMatch || nameMatch) && optionMatch;
+    }
+
+    private String buildExchangeChannelOrderNo(String sourceOrderNo, String newOrderNo) {
+        return "EXCHANGE-" + defaultString(sourceOrderNo).replace(" ", "") + "-" + newOrderNo;
+    }
+
+    private String buildExchangeDeliveryMemo(Order sourceOrder, ProductReturn ret) {
+        String originalMemo = sourceOrder != null && sourceOrder.getDeliveryMemo() != null
+            ? sourceOrder.getDeliveryMemo()
+            : "";
+        return "교환 재출고 / 원주문:" + ret.getOrderNo()
+            + (ret.getReturnReason() != null && !ret.getReturnReason().isBlank() ? " / 사유:" + ret.getReturnReason() : "")
+            + (originalMemo.isBlank() ? "" : " / 원메모참고");
+    }
+
+    private String asString(Object value) {
+        return value != null ? String.valueOf(value) : "";
+    }
+
+    private String defaultString(String value) {
+        return value != null ? value : "";
+    }
+
+    private String defaultString(String first, String second, String fallback) {
+        if (first != null && !first.isBlank()) return first;
+        if (second != null && !second.isBlank()) return second;
+        return fallback;
     }
 
     /* ── 반품 취소 ────────────────────────────────────── */

@@ -18,6 +18,8 @@ public interface SalesChannelRepository extends JpaRepository<SalesChannel, UUID
      * 판매처 코드로 조회
      */
     Optional<SalesChannel> findByChannelCode(String channelCode);
+
+    Optional<SalesChannel> findFirstByChannelNameIgnoreCase(String channelName);
     
     /**
      * 활성화된 판매처 목록 조회

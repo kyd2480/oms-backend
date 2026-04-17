@@ -55,6 +55,8 @@ public class CsOrderController {
             public String optionName;
             public int    quantity;
             public String productCode;  // 자사 상품 코드 (바코드/SKU 역할)
+            public int    cancelledQuantity;
+            public String itemStatus;
         }
     }
 
@@ -149,7 +151,7 @@ public class CsOrderController {
 
         dto.productName = getProductName(o);
         dto.quantity    = o.getItems() != null
-            ? o.getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum() : 0;
+            ? o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum() : 0;
 
         parseDeliveryMemo(o, dto);
 
@@ -158,8 +160,10 @@ public class CsOrderController {
                 CsOrderDTO.ItemDTO item = new CsOrderDTO.ItemDTO();
                 item.productName = it.getProductName();
                 item.optionName  = it.getOptionName();
-                item.quantity    = it.getQuantity() != null ? it.getQuantity() : 0;
+                item.quantity    = it.getActiveQuantity();
                 item.productCode = it.getProductCode();
+                item.cancelledQuantity = it.getCancelledQuantity() != null ? it.getCancelledQuantity() : 0;
+                item.itemStatus = it.getItemStatus() != null ? it.getItemStatus().name() : "ACTIVE";
                 return item;
               }).collect(Collectors.toList())
             : new ArrayList<>();
@@ -200,6 +204,7 @@ public class CsOrderController {
     private String getProductName(Order o) {
         if (o.getItems() == null || o.getItems().isEmpty()) return null;
         return o.getItems().stream()
+            .filter(item -> item.getActiveQuantity() > 0)
             .map(OrderItem::getProductName).filter(Objects::nonNull)
             .collect(Collectors.joining(", "));
     }

@@ -19,6 +19,9 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @EntityGraph(attributePaths = {"items", "channel"})
     Optional<Order> findWithItemsByOrderNo(String orderNo);
 
+    @EntityGraph(attributePaths = {"items", "channel"})
+    Optional<Order> findFirstByChannelChannelCodeAndChannelOrderNo(String channelCode, String channelOrderNo);
+
     Optional<Order> findFirstByOrderByOrderedAtDesc();
 
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
@@ -112,6 +115,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         LEFT JOIN products p ON LOWER(p.sku)     = LOWER(oi.product_code)
                              OR LOWER(p.barcode) = LOWER(oi.product_code)
         WHERE o.order_status = 'PENDING'
+          AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND p.product_id IS NULL
         """, nativeQuery = true)
     Long countPendingUnmatched();
@@ -128,7 +132,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             CAST(o.ordered_at AS VARCHAR) AS orderedAt,
             oi.product_name     AS productName,
             oi.product_code     AS productCode,
-            oi.quantity         AS quantity,
+            GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) AS quantity,
             p.product_id        AS productId,
             p.sku               AS sku,
             COALESCE(p.warehouse_stock_anyang,  0) AS warehouseStockAnyang,
@@ -140,6 +144,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                             OR LOWER(p.barcode) = LOWER(oi.product_code)
         LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
         WHERE o.order_status = 'PENDING'
+          AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND oi.product_code IS NOT NULL
           AND oi.product_code <> ''
           AND oi.product_code !~* '^(11ST|NAVER|CP|GS|COUPANG|KAKAO)-'
@@ -160,7 +165,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             CAST(o.ordered_at AS VARCHAR) AS orderedAt,
             oi.product_name     AS productName,
             oi.product_code     AS productCode,
-            oi.quantity         AS quantity,
+            GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) AS quantity,
             CAST(NULL AS uuid)  AS productId,
             CAST(NULL AS VARCHAR) AS sku,
             0                   AS warehouseStockAnyang,
@@ -172,6 +177,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                              OR LOWER(p.barcode) = LOWER(oi.product_code)
         LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
         WHERE o.order_status = 'PENDING'
+          AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND p.product_id IS NULL
         ORDER BY o.ordered_at DESC
         """, nativeQuery = true)
@@ -189,7 +195,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             CAST(o.ordered_at AS VARCHAR) AS orderedAt,
             oi.product_name     AS productName,
             oi.product_code     AS productCode,
-            oi.quantity         AS quantity,
+            GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) AS quantity,
             p.product_id        AS productId,
             p.sku               AS sku,
             COALESCE(p.warehouse_stock_anyang,  0) AS warehouseStockAnyang,
@@ -201,6 +207,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                              OR LOWER(p.barcode) = LOWER(oi.product_code)
         LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
         WHERE o.order_status = 'CONFIRMED'
+          AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
         ORDER BY o.ordered_at DESC
         """, nativeQuery = true)
     List<MatchedItemProjection> findConfirmedWithProducts();

@@ -145,7 +145,8 @@ public class CancelController {
             order.getItems().forEach(item -> {
                 Product product = findProduct(item);
                 if (product == null) return;
-                int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+                int qty = item.getActiveQuantity();
+                if (qty <= 0) return;
                 try {
                     inventoryService.releaseReservedStock(product.getProductId(), qty);
                     log.info("예약 재고 해제: {} {}개", product.getProductName(), qty);
@@ -189,7 +190,7 @@ public class CancelController {
 
         dto.productName = getProductName(o);
         dto.quantity    = o.getItems() != null
-            ? o.getItems().stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum() : 0;
+            ? o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum() : 0;
 
         dto.items = o.getItems() != null
             ? o.getItems().stream().map(it -> {
@@ -207,6 +208,7 @@ public class CancelController {
     private String getProductName(Order o) {
         if (o.getItems() == null || o.getItems().isEmpty()) return null;
         return o.getItems().stream()
+            .filter(item -> item.getActiveQuantity() > 0)
             .map(OrderItem::getProductName).filter(Objects::nonNull)
             .collect(Collectors.joining(", "));
     }
