@@ -6,6 +6,7 @@ import com.oms.collector.entity.InventoryTransaction;
 import com.oms.collector.entity.Product;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.ProductSearchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,7 @@ public class InventoryController {
 
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
+    private final ProductSearchService productSearchService;
 
     @GetMapping("/products")
     public ResponseEntity<List<ProductDto>> getAllProducts() {
@@ -43,7 +45,7 @@ public class InventoryController {
     @GetMapping("/products/search")
     public ResponseEntity<List<ProductDto>> searchProducts(@RequestParam String keyword) {
         log.info("🔍 상품 검색: {}", keyword);
-        List<Product> products = productRepository.searchProducts(keyword);
+        List<Product> products = productSearchService.search(keyword, 100);
         log.info("✅ 검색 결과: {}개", products.size());
         return ResponseEntity.ok(products.stream().map(this::toProductDto).collect(Collectors.toList()));
     }

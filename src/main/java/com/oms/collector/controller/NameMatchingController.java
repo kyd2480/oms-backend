@@ -9,6 +9,7 @@ import com.oms.collector.repository.ProductMatchingRuleRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.service.ProductSearchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -39,6 +40,7 @@ public class NameMatchingController {
     private final OrderRepository             orderRepository;
     private final ProductRepository           productRepository;
     private final ProductMatchingRuleRepository ruleRepository;
+    private final ProductSearchService        productSearchService;
 
     // ─── DTO ─────────────────────────────────────────────────────
 
@@ -210,9 +212,8 @@ public class NameMatchingController {
      */
     @GetMapping("/search")
     public ResponseEntity<List<ProductCandidateDTO>> search(@RequestParam String keyword) {
-        List<Product> products = productRepository.searchProducts(keyword);
+        List<Product> products = productSearchService.search(keyword, 20);
         List<ProductCandidateDTO> result = products.stream()
-            .limit(20)
             .map(ProductCandidateDTO::new)
             .collect(Collectors.toList());
         return ResponseEntity.ok(result);
@@ -482,13 +483,13 @@ public class NameMatchingController {
         String code = channelProductName.split(" ")[0];
         if (code.length() > 12) code = code.substring(0, 12);
 
-        List<Product> candidates = productRepository.searchProducts(code);
+        List<Product> candidates = productSearchService.search(code, 50);
 
         // 후보가 없으면 전체 상품명 앞부분으로 재검색
         if (candidates.isEmpty()) {
             String fallback = channelProductName.length() > 8
                 ? channelProductName.substring(0, 8) : channelProductName;
-            candidates = productRepository.searchProducts(fallback);
+            candidates = productSearchService.search(fallback, 50);
         }
 
         if (candidates.isEmpty()) return null;

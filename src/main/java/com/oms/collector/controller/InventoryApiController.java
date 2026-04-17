@@ -4,6 +4,7 @@ import com.oms.collector.entity.InventoryTransaction;
 import com.oms.collector.entity.Product;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.ProductSearchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,7 @@ public class InventoryApiController {
 
     private final ProductRepository productRepository;
     private final InventoryService  inventoryService;
+    private final ProductSearchService productSearchService;
 
     /* ── DTO ─────────────────────────────────────────────── */
 
@@ -139,8 +141,7 @@ public class InventoryApiController {
         @RequestParam(defaultValue = "30") int limit
     ) {
         return ResponseEntity.ok(
-            productRepository.searchProducts(keyword).stream()
-                .limit(limit)
+            productSearchService.search(keyword, limit).stream()
                 .map(ProductDTO::new)
                 .collect(Collectors.toList())
         );

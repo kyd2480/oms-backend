@@ -5,6 +5,7 @@ import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.service.ProductSearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -30,6 +31,7 @@ public class OmsAgentToolService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
+    private final ProductSearchService productSearchService;
 
     public Map<String, Object> getOrderOverview(String period) {
         LocalDate today = LocalDate.now(OMS_ZONE);
@@ -154,8 +156,7 @@ public class OmsAgentToolService {
 
     public Map<String, Object> searchProducts(String keyword, Integer limit) {
         int safeLimit = Math.min(Math.max(limit == null ? 10 : limit, 1), 20);
-        List<Product> products = productRepository.searchProducts(nullable(keyword)).stream()
-            .limit(safeLimit)
+        List<Product> products = productSearchService.search(nullable(keyword), safeLimit).stream()
             .toList();
 
         List<Map<String, Object>> items = products.stream()
