@@ -19,6 +19,7 @@ public interface MatchedItemProjection {
 
     // OrderItem
     String getProductName();
+    String getOptionName();
     String getProductCode();
     Integer getQuantity();
 

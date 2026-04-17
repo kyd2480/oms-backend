@@ -108,7 +108,10 @@ public class InvoiceController {
             this.address       = (o.getAddress() != null ? o.getAddress() : "")
                                + (o.getAddressDetail() != null ? " " + o.getAddressDetail() : "");
             this.productName   = o.getItems().isEmpty() ? "" :
-                o.getItems().stream().filter(i -> i.getActiveQuantity() > 0).map(i -> i.getProductName()).collect(Collectors.joining(", "));
+                o.getItems().stream()
+                    .filter(i -> i.getActiveQuantity() > 0)
+                    .map(i -> formatProductLabel(i.getProductName(), i.getOptionName()))
+                    .collect(Collectors.joining(", "));
             this.quantity      = o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
             this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
@@ -118,6 +121,13 @@ public class InvoiceController {
                 .collect(Collectors.toList());
             // 배송 메모에서 송장 정보 파싱 (저장 형식: "CARRIER:CJ|TRACKING:1234567890")
             parseInvoiceFromMemo(o.getDeliveryMemo());
+        }
+
+        private String formatProductLabel(String productName, String optionName) {
+            if (optionName == null || optionName.isBlank()) {
+                return productName;
+            }
+            return productName + " / " + optionName;
         }
 
         private void parseInvoiceFromMemo(String memo) {

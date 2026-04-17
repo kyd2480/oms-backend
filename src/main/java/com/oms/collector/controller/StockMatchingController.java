@@ -44,6 +44,7 @@ public class StockMatchingController {
         public String channelName;
         public String recipientName;
         public String productName;
+        public String optionName;
         public String productCode;
         public String sku;
         public int    ordered;
@@ -59,6 +60,7 @@ public class StockMatchingController {
             this.channelName    = row.getChannelName() != null ? row.getChannelName() : "";
             this.recipientName  = row.getRecipientName();
             this.productName    = row.getProductName();
+            this.optionName     = row.getOptionName();
             this.productCode    = row.getProductCode();
             this.sku            = row.getSku();
             this.ordered        = row.getQuantity() != null ? row.getQuantity() : 0;
@@ -86,6 +88,7 @@ public class StockMatchingController {
             this.channelName    = row.getChannelName() != null ? row.getChannelName() : "";
             this.recipientName  = row.getRecipientName();
             this.productName    = row.getProductName();
+            this.optionName     = row.getOptionName();
             this.productCode    = row.getProductCode();
             this.sku            = product != null ? product.getSku() : null;
             this.ordered        = row.getQuantity() != null ? row.getQuantity() : 0;
@@ -112,6 +115,7 @@ public class StockMatchingController {
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName = o.getRecipientName();
             this.productName   = item.getProductName();
+            this.optionName    = item.getOptionName();
             this.productCode   = item.getProductCode();
             this.sku           = product != null ? product.getSku() : null;
             this.ordered       = item.getQuantity() != null ? item.getQuantity() : 0;
