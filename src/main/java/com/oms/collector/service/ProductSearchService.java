@@ -46,33 +46,49 @@ public class ProductSearchService {
         String productName = safe(product.getProductName());
         String sku = safe(product.getSku());
         String barcode = safe(product.getBarcode());
+        String optionCode = safe(product.getOptionCode());
+        String optionName = safe(product.getOptionName());
+        String vendorName = safe(product.getVendorName());
         String description = safe(product.getDescription());
 
         String nameNorm = normalize(productName);
         String skuNorm = normalize(sku);
         String barcodeNorm = normalize(barcode);
+        String optionCodeNorm = normalize(optionCode);
+        String optionNameNorm = normalize(optionName);
+        String vendorNameNorm = normalize(vendorName);
         String descNorm = normalize(description);
 
         int score = 0;
 
         if (sku.equalsIgnoreCase(rawKeyword) || barcode.equalsIgnoreCase(rawKeyword)) score += 1000;
-        if (skuNorm.equals(normalizedKeyword) || barcodeNorm.equals(normalizedKeyword)) score += 950;
+        if (optionCode.equalsIgnoreCase(rawKeyword)) score += 980;
+        if (skuNorm.equals(normalizedKeyword) || barcodeNorm.equals(normalizedKeyword) || optionCodeNorm.equals(normalizedKeyword)) score += 950;
         if (nameNorm.equals(normalizedKeyword)) score += 900;
+        if (optionNameNorm.equals(normalizedKeyword)) score += 880;
 
         if (!skuNorm.isBlank() && skuNorm.startsWith(normalizedKeyword)) score += 700;
         if (!barcodeNorm.isBlank() && barcodeNorm.startsWith(normalizedKeyword)) score += 650;
+        if (!optionCodeNorm.isBlank() && optionCodeNorm.startsWith(normalizedKeyword)) score += 675;
         if (!nameNorm.isBlank() && nameNorm.startsWith(normalizedKeyword)) score += 600;
+        if (!optionNameNorm.isBlank() && optionNameNorm.startsWith(normalizedKeyword)) score += 575;
 
         if (!skuNorm.isBlank() && skuNorm.contains(normalizedKeyword)) score += 500;
         if (!barcodeNorm.isBlank() && barcodeNorm.contains(normalizedKeyword)) score += 450;
+        if (!optionCodeNorm.isBlank() && optionCodeNorm.contains(normalizedKeyword)) score += 470;
         if (!nameNorm.isBlank() && nameNorm.contains(normalizedKeyword)) score += 400;
+        if (!optionNameNorm.isBlank() && optionNameNorm.contains(normalizedKeyword)) score += 360;
+        if (!vendorNameNorm.isBlank() && vendorNameNorm.contains(normalizedKeyword)) score += 140;
         if (!descNorm.isBlank() && descNorm.contains(normalizedKeyword)) score += 150;
 
         for (String token : tokens) {
             if (token.isBlank()) continue;
             if (!skuNorm.isBlank() && skuNorm.contains(token)) score += 120;
             if (!barcodeNorm.isBlank() && barcodeNorm.contains(token)) score += 110;
+            if (!optionCodeNorm.isBlank() && optionCodeNorm.contains(token)) score += 115;
             if (!nameNorm.isBlank() && nameNorm.contains(token)) score += 100;
+            if (!optionNameNorm.isBlank() && optionNameNorm.contains(token)) score += 90;
+            if (!vendorNameNorm.isBlank() && vendorNameNorm.contains(token)) score += 35;
             if (!descNorm.isBlank() && descNorm.contains(token)) score += 40;
         }
 

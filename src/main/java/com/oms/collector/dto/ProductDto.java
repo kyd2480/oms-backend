@@ -22,6 +22,9 @@ public class ProductDto {
     private String sku;
     private String productName;
     private String barcode;
+    private String optionCode;
+    private String optionName;
+    private String vendorName;
     private String category;
     private BigDecimal costPrice;
     private BigDecimal sellingPrice;
@@ -34,6 +37,7 @@ public class ProductDto {
     private Integer warehouseStockBucheon;   // 3.부천검수창고 재고
     private Boolean isActive;
     private String description;
+    private String note;
     private Boolean isOutOfStock;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

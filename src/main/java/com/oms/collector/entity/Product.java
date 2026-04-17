@@ -38,6 +38,18 @@ public class Product {
     
     @Column(name = "barcode", length = 100)
     private String barcode;
+
+    @Column(name = "option_code", length = 100)
+    private String optionCode;
+
+    @Column(name = "option_name", length = 255)
+    private String optionName;
+
+    @Column(name = "vendor_name", length = 100)
+    private String vendorName;
+
+    @Column(name = "note", length = 500)
+    private String note;
     
     @Column(name = "category", length = 100)
     private String category;

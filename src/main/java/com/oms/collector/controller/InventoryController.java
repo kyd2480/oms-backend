@@ -60,6 +60,9 @@ public class InventoryController {
             .sku(dto.getSku())
             .productName(dto.getProductName())
             .barcode(dto.getBarcode())
+            .optionCode(dto.getOptionCode() != null ? dto.getOptionCode() : dto.getSku())
+            .optionName(dto.getOptionName())
+            .vendorName(dto.getVendorName())
             .category(dto.getCategory())
             .costPrice(dto.getCostPrice())
             .sellingPrice(dto.getSellingPrice())
@@ -69,6 +72,7 @@ public class InventoryController {
             .warehouseLocation(dto.getWarehouseLocation())
             .isActive(true)
             .description(dto.getDescription())
+            .note(dto.getNote())
             .createdAt(LocalDateTime.now())
             .updatedAt(LocalDateTime.now())
             .build();
@@ -84,11 +88,15 @@ public class InventoryController {
             .map(product -> {
                 product.setProductName(dto.getProductName());
                 product.setBarcode(dto.getBarcode());
+                product.setOptionCode(dto.getOptionCode() != null ? dto.getOptionCode() : product.getOptionCode());
+                product.setOptionName(dto.getOptionName());
+                product.setVendorName(dto.getVendorName());
                 product.setCategory(dto.getCategory());
                 product.setCostPrice(dto.getCostPrice());
                 product.setSellingPrice(dto.getSellingPrice());
                 product.setWarehouseLocation(dto.getWarehouseLocation());
                 product.setDescription(dto.getDescription());
+                product.setNote(dto.getNote());
                 product.setUpdatedAt(LocalDateTime.now());
                 return ResponseEntity.ok(toProductDto(productRepository.save(product)));
             })
@@ -266,6 +274,9 @@ public class InventoryController {
             .sku(product.getSku())
             .productName(product.getProductName())
             .barcode(product.getBarcode())
+            .optionCode(product.getOptionCode())
+            .optionName(product.getOptionName())
+            .vendorName(product.getVendorName())
             .category(product.getCategory())
             .costPrice(product.getCostPrice())
             .sellingPrice(product.getSellingPrice())
@@ -278,6 +289,7 @@ public class InventoryController {
             .warehouseStockBucheon(product.getWarehouseStockBucheon())
             .isActive(product.getIsActive())
             .description(product.getDescription())
+            .note(product.getNote())
             .isOutOfStock(product.isOutOfStock())
             .createdAt(product.getCreatedAt())
             .updatedAt(product.getUpdatedAt())
