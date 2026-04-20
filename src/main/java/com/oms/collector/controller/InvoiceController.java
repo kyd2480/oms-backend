@@ -622,11 +622,20 @@ public class InvoiceController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        cancelCarrierInvoiceIfNeeded(order);
-        order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
-        orderRepository.save(order);
-        log.info("송장삭제: {}", orderNo);
-        return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
+        try {
+            cancelCarrierInvoiceIfNeeded(order);
+            order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
+            orderRepository.save(order);
+            log.info("송장삭제: {}", orderNo);
+            return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.warn("송장삭제 실패 - 우체국 취소가 실패하여 로컬 송장을 유지합니다. orderNo={}, reason={}",
+                orderNo, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "success", false,
+                "message", "우체국 취소 실패: 송장이 유지되었습니다. " + e.getMessage()
+            ));
+        }
     }
 
 }
