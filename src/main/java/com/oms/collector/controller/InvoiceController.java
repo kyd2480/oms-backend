@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -408,21 +409,35 @@ public class InvoiceController {
         String carrierCode = body != null ? body.getOrDefault("carrierCode", "POST") : "POST";
         String carrierName = body != null ? body.getOrDefault("carrierName", "우체국택배") : "우체국택배";
 
-        Order order = orderRepository.findByOrderNo(orderNo)
-            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+        try {
+            Order order = orderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
-        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
-        orderRepository.save(order);
+            String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
+            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+            orderRepository.save(order);
 
-        log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
-        return ResponseEntity.ok(Map.of(
-            "success", true,
-            "trackingNo", trackingNo,
-            "carrierCode", carrierCode,
-            "carrierName", carrierName,
-            "message", "송장번호 자동 부여 완료: " + trackingNo
-        ));
+            log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "trackingNo", trackingNo,
+                "carrierCode", carrierCode,
+                "carrierName", carrierName,
+                "message", "송장번호 자동 부여 완료: " + trackingNo
+            ));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.error("송장 자동부여 실패: {} - {}", orderNo, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("송장 자동부여 중 예기치 않은 오류: {}", orderNo, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "송장 자동 부여 처리 중 서버 오류가 발생했습니다."
+            ));
+        }
     }
 
     /**
@@ -446,19 +461,29 @@ public class InvoiceController {
         orders.forEach(o -> o.getItems().size());
 
         int assigned = 0;
+        List<Map<String, String>> failedOrders = new ArrayList<>();
         for (Order order : orders) {
-            // 이미 송장 있으면 스킵
             if (extractInvoiceSegment(order.getDeliveryMemo()) != null) continue;
-            String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
-            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
-            orderRepository.save(order);
-            assigned++;
+            try {
+                String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+                orderRepository.save(order);
+                assigned++;
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                log.error("송장 일괄 자동부여 실패: {} - {}", order.getOrderNo(), e.getMessage(), e);
+                failedOrders.add(Map.of(
+                    "orderNo", order.getOrderNo(),
+                    "message", e.getMessage()
+                ));
+            }
         }
 
         log.info("송장 일괄 자동부여: {}건 ({})", assigned, carrierName);
         return ResponseEntity.ok(Map.of(
             "success", true,
             "assigned", assigned,
+            "failed", failedOrders.size(),
+            "failedOrders", failedOrders,
             "message", assigned + "건 송장번호 자동 부여 완료"
         ));
     }
