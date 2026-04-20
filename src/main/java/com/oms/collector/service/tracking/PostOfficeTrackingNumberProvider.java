@@ -100,7 +100,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
     }
 
     @Override
-    public String issue(String carrierCode, String carrierName, String orderNo) {
+    public IssueResult issue(String carrierCode, String carrierName, String orderNo) {
         if (!"POST".equals(carrierCode)) {
             throw new UnsupportedOperationException(
                 "PostOfficeTrackingNumberProvider는 우체국(POST)만 지원합니다. 요청 택배사: " + carrierCode
@@ -111,7 +111,8 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
     }
 
     @Override
-    public void cancel(String carrierCode, String carrierName, String orderNo, String trackingNo) {
+    public void cancel(String carrierCode, String carrierName, String orderNo,
+                       String trackingNo, String reservationNo) {
         if (!"POST".equals(carrierCode)) {
             throw new UnsupportedOperationException(
                 "PostOfficeTrackingNumberProvider는 우체국(POST)만 지원합니다. 요청 택배사: " + carrierCode
@@ -126,6 +127,9 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         fields.put("apprNo", resolvedApprNo);
         fields.put("reqType", "1");
         fields.put("reqNo", orderNo);
+        if (StringUtils.hasText(reservationNo)) {
+            fields.put("resNo", reservationNo);
+        }
         fields.put("regiNo", trackingNo);
 
         String xml = invokeApi(CANCEL_ORDER_API_PATH, encrypt(buildQueryString(fields)));
@@ -133,7 +137,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         log.info("[우체국 API] 송장번호 취소 완료: orderNo={}, trackingNo={}", orderNo, trackingNo);
     }
 
-    private String issueFromApi(String orderNo) {
+    private IssueResult issueFromApi(String orderNo) {
         validateConfiguration();
 
         Order order = orderRepository.findWithItemsByOrderNo(orderNo)
@@ -146,8 +150,9 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         ensureNoApiError(xml);
 
         String trackingNo = getRequiredTagValue(xml, "regiNo");
-        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}", orderNo, trackingNo);
-        return trackingNo;
+        String reservationNo = getOptionalTagValue(xml, "resNo");
+        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, resNo={}", orderNo, trackingNo, reservationNo);
+        return new IssueResult(trackingNo, reservationNo);
     }
 
     private void validateConfiguration() {

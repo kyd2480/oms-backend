@@ -76,7 +76,7 @@ public class InvoiceController {
     @Value("${tracking.post-office.contract-approval-no:}")
     private String contractApprovalNo;
 
-    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo, String reservationNo) {}
 
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
@@ -273,18 +273,22 @@ public class InvoiceController {
         return memo;
     }
 
-    private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName, String trackingNo) {
+    private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName,
+                                             String trackingNo, String reservationNo) {
         String deliveryMessage = extractDeliveryMessage(existingMemo);
         List<String> parts = new ArrayList<>();
         if (!deliveryMessage.isBlank()) {
             parts.add(MESSAGE_PREFIX + Base64.getUrlEncoder().encodeToString(deliveryMessage.getBytes(StandardCharsets.UTF_8)));
         }
-        parts.add(
-            INVOICE_PREFIX +
-            "CARRIER:" + Objects.toString(carrierCode, "") +
-            "|CARRIER_NAME:" + Objects.toString(carrierName, "") +
-            "|TRACKING:" + Objects.toString(trackingNo, "")
-        );
+        StringBuilder invoice = new StringBuilder()
+            .append(INVOICE_PREFIX)
+            .append("CARRIER:").append(Objects.toString(carrierCode, ""))
+            .append("|CARRIER_NAME:").append(Objects.toString(carrierName, ""))
+            .append("|TRACKING:").append(Objects.toString(trackingNo, ""));
+        if (reservationNo != null && !reservationNo.isBlank()) {
+            invoice.append("|RES_NO:").append(reservationNo);
+        }
+        parts.add(invoice.toString());
         return String.join("|", parts);
     }
 
@@ -302,6 +306,7 @@ public class InvoiceController {
         String carrierCode = null;
         String carrierName = null;
         String trackingNo = null;
+        String reservationNo = null;
         for (String part : invoiceSegment.split("\\|")) {
             String[] kv = part.split(":", 2);
             if (kv.length != 2) {
@@ -310,8 +315,9 @@ public class InvoiceController {
             if ("CARRIER".equals(kv[0])) carrierCode = kv[1];
             if ("CARRIER_NAME".equals(kv[0])) carrierName = kv[1];
             if ("TRACKING".equals(kv[0])) trackingNo = kv[1];
+            if ("RES_NO".equals(kv[0])) reservationNo = kv[1];
         }
-        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo, reservationNo);
     }
 
     private void cancelCarrierInvoiceIfNeeded(Order order) {
@@ -326,7 +332,8 @@ public class InvoiceController {
             invoiceInfo.carrierCode(),
             invoiceInfo.carrierName(),
             order.getOrderNo(),
-            invoiceInfo.trackingNo()
+            invoiceInfo.trackingNo(),
+            invoiceInfo.reservationNo()
         );
     }
 
@@ -403,7 +410,7 @@ public class InvoiceController {
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
         // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null));
         orderRepository.save(order);
 
         log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -430,7 +437,7 @@ public class InvoiceController {
                 if (orderNo == null || trackingNo == null || trackingNo.isBlank()) { failed++; continue; }
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
-                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null));
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -500,10 +507,12 @@ public class InvoiceController {
             Order order = orderRepository.findByOrderNo(orderNo)
                 .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-            String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
-            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+            var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
+            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
+                result.trackingNo(), result.reservationNo()));
             orderRepository.save(order);
 
+            String trackingNo = result.trackingNo();
             log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
             return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -552,8 +561,9 @@ public class InvoiceController {
         for (Order order : orders) {
             if (extractInvoiceSegment(order.getDeliveryMemo()) != null) continue;
             try {
-                String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
-                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo));
+                var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
+                    result.trackingNo(), result.reservationNo()));
                 orderRepository.save(order);
                 assigned++;
             } catch (IllegalArgumentException | IllegalStateException e) {
