@@ -99,7 +99,7 @@ tracking:
     test-yn: ${POST_OFFICE_TEST_YN:N}
     delivery-area:
       enabled: ${POST_OFFICE_DELIVERY_AREA_ENABLED:true}
-      base-url: ${POST_OFFICE_DELIVERY_AREA_BASE_URL:http://biz.epost.go.kr/KpostPortal/openapi}
+      base-url: ${POST_OFFICE_DELIVERY_AREA_BASE_URL:https://biz.epost.go.kr/KpostPortal/openapi}
       regkey: ${POST_OFFICE_DELIVERY_AREA_REGKEY:}
       mdiv: ${POST_OFFICE_DELIVERY_AREA_MDIV:1}
 

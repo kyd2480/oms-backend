@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class DeliveryAreaCodeService {
 
-    private static final String DEFAULT_BASE_URL = "http://biz.epost.go.kr/KpostPortal/openapi";
+    private static final String DEFAULT_BASE_URL = "https://biz.epost.go.kr/KpostPortal/openapi";
     private static final String DEFAULT_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/17)";
 
     private final Map<String, DeliveryAreaInfo> cache = new ConcurrentHashMap<>();
