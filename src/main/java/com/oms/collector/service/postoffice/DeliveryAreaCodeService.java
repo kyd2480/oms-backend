@@ -46,6 +46,8 @@ public class DeliveryAreaCodeService {
     @Value("${tracking.post-office.delivery-area.mdiv:1}")
     private String mdiv;
 
+    private volatile String lastErrorMessage = "";
+
     public DeliveryAreaInfo lookup(String postalCode, String fullAddress) {
         String zip = sanitizeZip(postalCode);
         String address = normalizeAddress(fullAddress);
@@ -61,6 +63,10 @@ public class DeliveryAreaCodeService {
         return enabled && StringUtils.hasText(regkey);
     }
 
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
+    }
+
     private DeliveryAreaInfo request(String zip, String address) {
         HttpURLConnection connection = null;
         try {
@@ -70,7 +76,8 @@ public class DeliveryAreaCodeService {
                 .queryParam("zip", zip)
                 .queryParam("addr", address)
                 .queryParam("mdiv", StringUtils.hasText(mdiv) ? mdiv : "1")
-                .build(true)
+                .build()
+                .encode(StandardCharsets.UTF_8)
                 .toUri();
 
             URL url = uri.toURL();
@@ -94,8 +101,10 @@ public class DeliveryAreaCodeService {
             if (!info.hasValue()) {
                 log.warn("집배코드 조회 결과 없음: zip={}, address={}", zip, address);
             }
+            lastErrorMessage = "";
             return info;
         } catch (Exception e) {
+            lastErrorMessage = e.getMessage();
             log.warn("집배코드 조회 실패: zip={}, address={}, reason={}", zip, address, e.getMessage());
             return DeliveryAreaInfo.empty();
         } finally {

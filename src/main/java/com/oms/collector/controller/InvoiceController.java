@@ -761,6 +761,7 @@ public class InvoiceController {
             "configured", deliveryAreaCodeService.isConfigured(),
             "zip", zip,
             "addr", addr,
+            "lastErrorMessage", Objects.toString(deliveryAreaCodeService.getLastErrorMessage(), ""),
             "deliveryAreaCode", info.deliveryAreaCode(),
             "arrivalCenterName", info.arrivalCenterName(),
             "deliveryPostOfficeName", info.deliveryPostOfficeName(),
