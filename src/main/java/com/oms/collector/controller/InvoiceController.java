@@ -137,6 +137,7 @@ public class InvoiceController {
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
+        public String invoiceIssuedAt;
         public String shippedAt;             // 출고(발송처리) 일시
         public String carrierCode;           // 택배사 코드
         public String carrierName;           // 택배사명
@@ -180,6 +181,7 @@ public class InvoiceController {
                     .collect(Collectors.joining(", "));
             this.quantity      = o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
+            this.invoiceIssuedAt = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             // 개별 상품 목록 (옵션·바코드 포함)
             this.items         = o.getItems().stream()
@@ -440,6 +442,7 @@ public class InvoiceController {
     /**
      * 송장 입력 완료 목록
      * GET /api/invoice/completed?startDate=2026-01-01&endDate=2026-03-19
+     * 날짜는 송장 입력/발급 시각(updatedAt) 기준
      */
     @GetMapping("/completed")
     @Transactional(readOnly = true)
@@ -453,11 +456,11 @@ public class InvoiceController {
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
-            orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
+            orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.CONFIRMED, start, end);
         } else {
             orders = new ArrayList<>();
             int p = 0; while(true) {
-                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "updatedAt"));
                 var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
