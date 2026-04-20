@@ -116,6 +116,7 @@ public class InvoiceController {
         public String channelName;
         public String recipientName;
         public String recipientPhone;
+        public String postalCode;
         public String address;
         public String senderCompanyName;
         public String senderContact;
@@ -141,6 +142,7 @@ public class InvoiceController {
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
             this.recipientPhone = o.getRecipientPhone();
+            this.postalCode     = o.getPostalCode() != null ? o.getPostalCode() : "";
             this.address       = (o.getAddress() != null ? o.getAddress() : "")
                                + (o.getAddressDetail() != null ? " " + o.getAddressDetail() : "");
             this.senderCompanyName = senderCompanyName != null ? senderCompanyName : "";
