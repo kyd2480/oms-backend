@@ -39,7 +39,9 @@ public class CsOrderController {
         public String  channelName;
         public String  recipientName;
         public String  recipientPhone;
+        public String  postalCode;
         public String  address;
+        public String  addressDetail;
         public String  productName;
         public int     quantity;
         public String  orderStatus;
@@ -58,6 +60,14 @@ public class CsOrderController {
             public int    cancelledQuantity;
             public String itemStatus;
         }
+    }
+
+    public static class UpdateShippingRequest {
+        public String recipientName;
+        public String recipientPhone;
+        public String postalCode;
+        public String address;
+        public String addressDetail;
     }
 
     @GetMapping("/orders")
@@ -114,6 +124,49 @@ public class CsOrderController {
         return ResponseEntity.ok(orders.stream().map(this::toDTO).collect(Collectors.toList()));
     }
 
+    @PatchMapping("/orders/{orderNo}/shipping")
+    @Transactional
+    public ResponseEntity<?> updateShippingInfo(
+        @PathVariable String orderNo,
+        @RequestBody UpdateShippingRequest request
+    ) {
+        Order order = orderRepository.findByOrderNo(orderNo)
+            .orElseThrow(() -> new IllegalArgumentException("주문을 찾을 수 없습니다: " + orderNo));
+
+        String recipientName = normalizeText(request.recipientName);
+        String recipientPhone = normalizePhone(request.recipientPhone);
+        String postalCode = normalizePostalCode(request.postalCode);
+        String address = normalizeText(request.address);
+        String addressDetail = normalizeText(request.addressDetail);
+
+        if (recipientName == null) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "수령인명을 입력해주세요."));
+        }
+        if (recipientPhone == null) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "수령인 연락처를 입력해주세요."));
+        }
+        if (postalCode == null) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "우편번호는 5자리 숫자로 입력해주세요."));
+        }
+        if (address == null) {
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "주소를 입력해주세요."));
+        }
+
+        order.setRecipientName(recipientName);
+        order.setRecipientPhone(recipientPhone);
+        order.setPostalCode(postalCode);
+        order.setAddress(address);
+        order.setAddressDetail(addressDetail);
+        orderRepository.save(order);
+
+        log.info("CS 배송지 수정: orderNo={}, recipientName={}, postalCode={}", orderNo, recipientName, postalCode);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "배송지 정보가 수정되었습니다.",
+            "order", toDTO(order)
+        ));
+    }
+
     private List<Order> filterByKeyword(List<Order> orders, String searchType, String kw) {
         return orders.stream().filter(o -> switch (searchType) {
             case "주문번호" -> contains(o.getOrderNo(), kw);
@@ -134,7 +187,9 @@ public class CsOrderController {
         dto.orderNo        = o.getOrderNo();
         dto.recipientName  = o.getRecipientName();
         dto.recipientPhone = o.getRecipientPhone();
+        dto.postalCode     = o.getPostalCode();
         dto.address        = o.getAddress();
+        dto.addressDetail  = o.getAddressDetail();
         dto.orderStatus    = o.getOrderStatus() != null ? o.getOrderStatus().name() : "PENDING";
         dto.orderedAt      = o.getOrderedAt() != null ? o.getOrderedAt().toString() : null;
         dto.shippedAt      = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : null;
@@ -211,5 +266,31 @@ public class CsOrderController {
 
     private boolean contains(String val, String kw) {
         return val != null && val.toLowerCase().contains(kw);
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizePhone(String value) {
+        String trimmed = normalizeText(value);
+        if (trimmed == null) {
+            return null;
+        }
+        String digits = trimmed.replaceAll("[^0-9]", "");
+        return digits.isEmpty() ? null : digits;
+    }
+
+    private String normalizePostalCode(String value) {
+        String trimmed = normalizeText(value);
+        if (trimmed == null) {
+            return null;
+        }
+        String digits = trimmed.replaceAll("[^0-9]", "");
+        return digits.matches("\\d{5}") ? digits : null;
     }
 }
