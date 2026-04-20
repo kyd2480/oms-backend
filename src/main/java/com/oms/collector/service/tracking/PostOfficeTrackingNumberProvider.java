@@ -17,11 +17,13 @@ import org.xml.sax.InputSource;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.StringReader;
+import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -51,9 +53,6 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
     private static final String DEFAULT_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/17)";
 
     private final OrderRepository orderRepository;
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
     private final SEED128 seed128 = new SEED128();
 
     @Value("${tracking.post-office.base-url:" + DEFAULT_BASE_URL + "}")
@@ -215,21 +214,45 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
             .build(true)
             .toUri();
 
+        HttpURLConnection connection = null;
         try {
-            HttpRequest request = HttpRequest.newBuilder(uri)
-                .GET()
-                .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", DEFAULT_USER_AGENT)
-                .header("Accept-Charset", StandardCharsets.UTF_8.name())
-                .build();
+            URL url = uri.toURL();
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout((int) Duration.ofSeconds(10).toMillis());
+            connection.setReadTimeout((int) Duration.ofSeconds(20).toMillis());
+            connection.setUseCaches(false);
+            connection.setDoInput(true);
+            connection.setRequestProperty("User-Agent", DEFAULT_USER_AGENT);
+            connection.setRequestProperty("Accept-Charset", StandardCharsets.UTF_8.name());
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() >= 400) {
-                throw new IllegalStateException("우체국 API 호출 실패: HTTP " + response.statusCode());
+            int statusCode = connection.getResponseCode();
+            InputStream stream = statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String responseBody = readResponse(stream);
+            if (statusCode >= 400) {
+                throw new IllegalStateException("우체국 API 호출 실패: HTTP " + statusCode + " " + responseBody);
             }
-            return response.body();
+            return responseBody;
         } catch (Exception e) {
             throw new IllegalStateException("우체국 API 호출 중 오류가 발생했습니다: " + e.getMessage(), e);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String readResponse(InputStream stream) throws Exception {
+        if (stream == null) {
+            return "";
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            StringBuilder builder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+            return builder.toString();
         }
     }
 
