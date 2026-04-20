@@ -219,8 +219,6 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
             HttpRequest request = HttpRequest.newBuilder(uri)
                 .GET()
                 .timeout(Duration.ofSeconds(20))
-                .header("Connection", "keep-alive")
-                .header("Host", uri.getHost())
                 .header("User-Agent", DEFAULT_USER_AGENT)
                 .header("Accept-Charset", StandardCharsets.UTF_8.name())
                 .build();
