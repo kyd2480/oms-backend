@@ -295,6 +295,26 @@ public class DeliveryAreaCodeService {
             return new ParsedDeliveryAreaCode(centerCode, postOfficeCode, teamCode, detailCode);
         }
 
+        public String arrivalCenterCode() {
+            ParsedDeliveryAreaCode parsed = parseDeliveryAreaCode();
+            return parsed != null ? parsed.centerCode() : "";
+        }
+
+        public String deliveryPostOfficeCode() {
+            ParsedDeliveryAreaCode parsed = parseDeliveryAreaCode();
+            return parsed != null ? parsed.postOfficeCode() : "";
+        }
+
+        public String deliveryTeamCode() {
+            ParsedDeliveryAreaCode parsed = parseDeliveryAreaCode();
+            return parsed != null ? parsed.teamCode() : "";
+        }
+
+        public String deliveryDistrictCode() {
+            ParsedDeliveryAreaCode parsed = parseDeliveryAreaCode();
+            return parsed != null ? parsed.detailCode() : "";
+        }
+
         private record ParsedDeliveryAreaCode(
             String centerCode,
             String postOfficeCode,
