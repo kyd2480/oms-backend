@@ -65,6 +65,15 @@ public class InvoiceController {
     @Value("${tracking.post-office.sender-address-detail:}")
     private String senderAddressDetail;
 
+    @Value("${tracking.post-office.office-ser:}")
+    private String officeSer;
+
+    @Value("${tracking.post-office.content-code:}")
+    private String contentCode;
+
+    @Value("${tracking.post-office.contract-approval-no:}")
+    private String contractApprovalNo;
+
     private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
     // 택배사 목록
@@ -112,6 +121,8 @@ public class InvoiceController {
         public String senderContact;
         public String senderZip;
         public String senderAddress;
+        public String senderRoutePrimary;
+        public String senderRouteSecondary;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
@@ -124,7 +135,8 @@ public class InvoiceController {
         public List<OrderItemDTO> items;     // ★ 개별 상품 목록 (옵션·바코드 포함)
 
         public InvoiceOrderDTO(Order o, Map<String, Product> productMap, String senderCompanyName,
-                               String senderContact, String senderZip, String senderAddress) {
+                               String senderContact, String senderZip, String senderAddress,
+                               String senderRoutePrimary, String senderRouteSecondary) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
@@ -135,6 +147,8 @@ public class InvoiceController {
             this.senderContact = senderContact != null ? senderContact : "";
             this.senderZip = senderZip != null ? senderZip : "";
             this.senderAddress = senderAddress != null ? senderAddress : "";
+            this.senderRoutePrimary = senderRoutePrimary != null ? senderRoutePrimary : "";
+            this.senderRouteSecondary = senderRouteSecondary != null ? senderRouteSecondary : "";
             this.productName   = o.getItems().isEmpty() ? "" :
                 o.getItems().stream()
                     .filter(i -> i.getActiveQuantity() > 0)
@@ -334,7 +348,8 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
+                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -433,7 +448,8 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
+                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
             .filter(dto -> dto.hasInvoice)
             .collect(Collectors.toList());
 
@@ -565,7 +581,8 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
+                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -707,6 +724,20 @@ public class InvoiceController {
             return address;
         }
         return address + " " + detail;
+    }
+
+    private String buildSenderRoutePrimary() {
+        List<String> parts = new ArrayList<>();
+        if (officeSer != null && !officeSer.isBlank()) parts.add("공급지 " + officeSer.trim());
+        if (contentCode != null && !contentCode.isBlank()) parts.add("내용 " + contentCode.trim());
+        return String.join("  ", parts);
+    }
+
+    private String buildSenderRouteSecondary() {
+        if (contractApprovalNo == null || contractApprovalNo.isBlank()) {
+            return "";
+        }
+        return "승인 " + contractApprovalNo.trim();
     }
 
 }
