@@ -129,6 +129,7 @@ public class InvoiceController {
         public String deliveryAreaCode;
         public String arrivalCenterName;
         public String deliveryPostOfficeName;
+        public String deliveryCourseNo;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
@@ -143,7 +144,8 @@ public class InvoiceController {
         public InvoiceOrderDTO(Order o, Map<String, Product> productMap, String senderCompanyName,
                                String senderContact, String senderZip, String senderAddress,
                                String senderRoutePrimary, String senderRouteSecondary,
-                               String deliveryAreaCode, String arrivalCenterName, String deliveryPostOfficeName) {
+                               String deliveryAreaCode, String arrivalCenterName,
+                               String deliveryPostOfficeName, String deliveryCourseNo) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
@@ -160,6 +162,7 @@ public class InvoiceController {
             this.deliveryAreaCode = deliveryAreaCode != null ? deliveryAreaCode : "";
             this.arrivalCenterName = arrivalCenterName != null ? arrivalCenterName : "";
             this.deliveryPostOfficeName = deliveryPostOfficeName != null ? deliveryPostOfficeName : "";
+            this.deliveryCourseNo = deliveryCourseNo != null ? deliveryCourseNo : "";
             this.productName   = o.getItems().isEmpty() ? "" :
                 o.getItems().stream()
                     .filter(i -> i.getActiveQuantity() > 0)
@@ -761,6 +764,7 @@ public class InvoiceController {
             "deliveryAreaCode", info.deliveryAreaCode(),
             "arrivalCenterName", info.arrivalCenterName(),
             "deliveryPostOfficeName", info.deliveryPostOfficeName(),
+            "deliveryCourseNo", info.courseNo(),
             "primaryLine", info.toPrimaryLine(),
             "secondaryLine", info.toSecondaryLine()
         ));
@@ -789,7 +793,8 @@ public class InvoiceController {
             senderRouteSecondary,
             deliveryAreaInfo.deliveryAreaCode(),
             deliveryAreaInfo.arrivalCenterName(),
-            deliveryAreaInfo.deliveryPostOfficeName()
+            deliveryAreaInfo.deliveryPostOfficeName(),
+            deliveryAreaInfo.courseNo()
         );
     }
 

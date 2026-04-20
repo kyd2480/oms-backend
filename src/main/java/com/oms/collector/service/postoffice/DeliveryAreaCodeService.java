@@ -120,8 +120,9 @@ public class DeliveryAreaCodeService {
         String deliveryAreaCode = getTagValue(document, "delivAreaCd");
         String arrivalCenterName = getTagValue(document, "arrCnpoNm");
         String deliveryPostOfficeName = getTagValue(document, "delivPoNm");
+        String courseNo = getTagValue(document, "courseNo");
 
-        return new DeliveryAreaInfo(deliveryAreaCode, arrivalCenterName, deliveryPostOfficeName);
+        return new DeliveryAreaInfo(deliveryAreaCode, arrivalCenterName, deliveryPostOfficeName, courseNo);
     }
 
     private String getTagValue(Document document, String tagName) {
@@ -179,32 +180,90 @@ public class DeliveryAreaCodeService {
         return address.replaceAll("\\s+", " ").trim();
     }
 
-    public record DeliveryAreaInfo(String deliveryAreaCode, String arrivalCenterName, String deliveryPostOfficeName) {
+    public record DeliveryAreaInfo(
+        String deliveryAreaCode,
+        String arrivalCenterName,
+        String deliveryPostOfficeName,
+        String courseNo
+    ) {
 
         public static DeliveryAreaInfo empty() {
-            return new DeliveryAreaInfo("", "", "");
+            return new DeliveryAreaInfo("", "", "", "");
         }
 
         public boolean hasValue() {
             return StringUtils.hasText(deliveryAreaCode)
                 || StringUtils.hasText(arrivalCenterName)
-                || StringUtils.hasText(deliveryPostOfficeName);
+                || StringUtils.hasText(deliveryPostOfficeName)
+                || StringUtils.hasText(courseNo);
         }
 
         public String toPrimaryLine() {
-            StringBuilder builder = new StringBuilder();
-            appendPart(builder, deliveryAreaCode);
-            appendPart(builder, arrivalCenterName);
-            appendPart(builder, deliveryPostOfficeName);
-            return builder.toString().trim();
+            ParsedDeliveryAreaCode parsed = parseDeliveryAreaCode();
+            if (parsed != null) {
+                StringBuilder builder = new StringBuilder();
+                appendPart(builder, formatNamedSegment(parsed.centerCode(), arrivalCenterName));
+                appendPart(builder, formatNamedSegment(parsed.postOfficeCode(), deliveryPostOfficeName));
+                appendPart(builder, parsed.teamCode());
+                appendPart(builder, parsed.detailCode());
+                return builder.toString().trim();
+            }
+
+            StringBuilder fallback = new StringBuilder();
+            appendPart(fallback, formatCodeWithCenter());
+            appendPart(fallback, deliveryPostOfficeName);
+            return fallback.toString().trim();
         }
 
         public String toSecondaryLine() {
-            if (StringUtils.hasText(deliveryAreaCode)) {
-                return "-" + deliveryAreaCode + "-";
+            if (StringUtils.hasText(courseNo)) {
+                return "-" + courseNo + "-";
             }
             return "";
         }
+
+        private String formatCodeWithCenter() {
+            if (!StringUtils.hasText(deliveryAreaCode)) {
+                return arrivalCenterName;
+            }
+            if (!StringUtils.hasText(arrivalCenterName)) {
+                return deliveryAreaCode;
+            }
+            return deliveryAreaCode + "(" + arrivalCenterName.trim() + ")";
+        }
+
+        private String formatNamedSegment(String code, String name) {
+            if (!StringUtils.hasText(code)) {
+                return name;
+            }
+            if (!StringUtils.hasText(name)) {
+                return code;
+            }
+            return code + "(" + name.trim() + ")";
+        }
+
+        private ParsedDeliveryAreaCode parseDeliveryAreaCode() {
+            if (!StringUtils.hasText(deliveryAreaCode)) {
+                return null;
+            }
+            String normalized = deliveryAreaCode.trim().replaceAll("\\s+", "");
+            if (normalized.length() < 9) {
+                return null;
+            }
+
+            String centerCode = normalized.substring(0, 2);
+            String postOfficeCode = normalized.substring(2, 5);
+            String teamCode = normalized.substring(5, 7);
+            String detailCode = normalized.substring(7, 9);
+            return new ParsedDeliveryAreaCode(centerCode, postOfficeCode, teamCode, detailCode);
+        }
+
+        private record ParsedDeliveryAreaCode(
+            String centerCode,
+            String postOfficeCode,
+            String teamCode,
+            String detailCode
+        ) {}
 
         private void appendPart(StringBuilder builder, String value) {
             if (!StringUtils.hasText(value)) {
