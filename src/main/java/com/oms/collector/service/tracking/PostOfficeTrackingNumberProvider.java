@@ -206,7 +206,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         fields.put("contCd", truncate(contentCode, 3));
         fields.put("goodsNm", truncate(buildGoodsName(order), 400));
         putIfHasText(fields, "goodsCd", truncate(buildGoodsCode(order), 400));
-        putIfHasText(fields, "goodsSize", truncate(buildOptionSummary(order), 30));
+        putIfHasText(fields, "goodsSize", truncateBytes(buildOptionSummary(order), 30));
         fields.put("qty", Integer.toString(order.getItems().stream()
             .mapToInt(item -> item.getQuantity() == null ? 0 : item.getQuantity())
             .sum()));
@@ -370,6 +370,20 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
             return null;
         }
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private String truncateBytes(String value, int maxBytes) {
+        if (value == null) return null;
+        if (value.getBytes(StandardCharsets.UTF_8).length <= maxBytes) return value;
+        StringBuilder sb = new StringBuilder();
+        int byteCount = 0;
+        for (char c : value.toCharArray()) {
+            int charBytes = String.valueOf(c).getBytes(StandardCharsets.UTF_8).length;
+            if (byteCount + charBytes > maxBytes) break;
+            sb.append(c);
+            byteCount += charBytes;
+        }
+        return sb.toString();
     }
 
     private String sanitizeRegDataValue(String value) {
