@@ -78,6 +78,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         @Param("start")  java.time.LocalDateTime start,
         @Param("end")    java.time.LocalDateTime end);
 
+    @Query("SELECT o FROM Order o WHERE o.orderStatus IN :statuses " +
+           "AND o.updatedAt BETWEEN :start AND :end ORDER BY o.updatedAt DESC")
+    List<Order> findByOrderStatusInAndUpdatedAtRange(
+        @Param("statuses") java.util.Collection<Order.OrderStatus> statuses,
+        @Param("start")    java.time.LocalDateTime start,
+        @Param("end")      java.time.LocalDateTime end);
+
+    Page<Order> findByOrderStatusIn(java.util.Collection<Order.OrderStatus> statuses, Pageable pageable);
+
     @Query("SELECT o FROM Order o LEFT JOIN FETCH o.channel c " +
            "WHERE (:status IS NULL OR o.orderStatus = :status) " +
            "AND (:keyword IS NULL OR :keyword = '' " +

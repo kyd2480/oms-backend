@@ -125,6 +125,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         fields.put("custNo", customerNo);
         fields.put("apprNo", resolvedApprNo);
         fields.put("reqType", "1");
+        fields.put("reqNo", orderNo);
         fields.put("regiNo", trackingNo);
 
         String xml = invokeApi(CANCEL_ORDER_API_PATH, encrypt(buildQueryString(fields)));

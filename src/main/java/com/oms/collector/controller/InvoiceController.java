@@ -452,16 +452,18 @@ public class InvoiceController {
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate
     ) {
+        // CONFIRMED(송장입력 완료) + SHIPPED(검수출고 완료) 모두 포함
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
         List<Order> orders;
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
-            orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.CONFIRMED, start, end);
+            orders = orderRepository.findByOrderStatusInAndUpdatedAtRange(statuses, start, end);
         } else {
             orders = new ArrayList<>();
             int p = 0; while(true) {
                 var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "updatedAt"));
-                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+                var sl = orderRepository.findByOrderStatusIn(statuses, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
         }
