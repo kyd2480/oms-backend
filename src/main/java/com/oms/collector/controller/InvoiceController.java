@@ -770,10 +770,11 @@ public class InvoiceController {
         DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo =
             deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
 
-        String senderRoutePrimary = deliveryAreaInfo.hasValue()
+        boolean deliveryAreaConfigured = deliveryAreaCodeService.isConfigured();
+        String senderRoutePrimary = deliveryAreaConfigured
             ? deliveryAreaInfo.toPrimaryLine()
             : buildSenderRoutePrimary();
-        String senderRouteSecondary = deliveryAreaInfo.hasValue()
+        String senderRouteSecondary = deliveryAreaConfigured
             ? deliveryAreaInfo.toSecondaryLine()
             : buildSenderRouteSecondary();
 
