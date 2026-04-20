@@ -9,6 +9,7 @@ import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -49,6 +50,21 @@ public class InvoiceController {
     private final InventoryService inventoryService;
     private final TrackingNumberProvider trackingNumberProvider;
 
+    @Value("${tracking.post-office.order-company-name:}")
+    private String senderCompanyName;
+
+    @Value("${tracking.post-office.inquiry-tel:}")
+    private String senderContact;
+
+    @Value("${tracking.post-office.sender-zip:}")
+    private String senderZip;
+
+    @Value("${tracking.post-office.sender-address:}")
+    private String senderAddress;
+
+    @Value("${tracking.post-office.sender-address-detail:}")
+    private String senderAddressDetail;
+
     private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
     // 택배사 목록
@@ -68,15 +84,17 @@ public class InvoiceController {
         public String productName;  // 상품명
         public String option;       // 옵션 (색상/사이즈 등)
         public String barcode;      // 바코드 (추후 OrderItem 엔티티에 필드 추가 시 활성화)
+        public String location;     // 재고 위치
         public int    quantity;     // 수량
         public int    originalQuantity;
         public int    cancelledQuantity;
         public String itemStatus;
 
-        public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
+        public OrderItemDTO(com.oms.collector.entity.OrderItem i, String location) {
             this.productName = i.getProductName();
             this.option      = i.getOptionName() != null ? i.getOptionName() : "";
             this.barcode     = i.getProductCode() != null ? i.getProductCode() : "";  // product_code = 바코드
+            this.location    = location != null ? location : "";
             this.quantity    = i.getActiveQuantity();
             this.originalQuantity = i.getQuantity() != null ? i.getQuantity() : 1;
             this.cancelledQuantity = i.getCancelledQuantity() != null ? i.getCancelledQuantity() : 0;
@@ -90,6 +108,10 @@ public class InvoiceController {
         public String recipientName;
         public String recipientPhone;
         public String address;
+        public String senderCompanyName;
+        public String senderContact;
+        public String senderZip;
+        public String senderAddress;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
@@ -101,13 +123,18 @@ public class InvoiceController {
         public boolean hasInvoice;           // 송장 입력 여부
         public List<OrderItemDTO> items;     // ★ 개별 상품 목록 (옵션·바코드 포함)
 
-        public InvoiceOrderDTO(Order o) {
+        public InvoiceOrderDTO(Order o, Map<String, Product> productMap, String senderCompanyName,
+                               String senderContact, String senderZip, String senderAddress) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
             this.recipientPhone = o.getRecipientPhone();
             this.address       = (o.getAddress() != null ? o.getAddress() : "")
                                + (o.getAddressDetail() != null ? " " + o.getAddressDetail() : "");
+            this.senderCompanyName = senderCompanyName != null ? senderCompanyName : "";
+            this.senderContact = senderContact != null ? senderContact : "";
+            this.senderZip = senderZip != null ? senderZip : "";
+            this.senderAddress = senderAddress != null ? senderAddress : "";
             this.productName   = o.getItems().isEmpty() ? "" :
                 o.getItems().stream()
                     .filter(i -> i.getActiveQuantity() > 0)
@@ -118,10 +145,23 @@ public class InvoiceController {
             this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             // 개별 상품 목록 (옵션·바코드 포함)
             this.items         = o.getItems().stream()
-                .map(OrderItemDTO::new)
+                .filter(i -> i.getActiveQuantity() > 0)
+                .map(i -> new OrderItemDTO(i, resolveLocation(productMap, i)))
                 .collect(Collectors.toList());
             // 배송 메모에서 송장 정보 파싱 (저장 형식: "CARRIER:CJ|TRACKING:1234567890")
             parseInvoiceFromMemo(o.getDeliveryMemo());
+        }
+
+        private String resolveLocation(Map<String, Product> productMap, OrderItem item) {
+            String productCode = item.getProductCode();
+            if (productCode == null) {
+                return "";
+            }
+            Product product = productMap.get(productCode.toLowerCase());
+            if (product == null || product.getWarehouseLocation() == null) {
+                return "";
+            }
+            return product.getWarehouseLocation().trim();
         }
 
         private String formatProductLabel(String productName, String optionName) {
@@ -291,8 +331,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -388,8 +430,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
             .filter(dto -> dto.hasInvoice)
             .collect(Collectors.toList());
 
@@ -518,8 +562,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -636,6 +682,31 @@ public class InvoiceController {
                 "message", "우체국 취소 실패: 송장이 유지되었습니다. " + e.getMessage()
             ));
         }
+    }
+
+    private Map<String, Product> getInvoiceProductMap() {
+        Map<String, Product> productMap = new HashMap<>();
+        for (Product product : productRepository.findAll()) {
+            if (product.getSku() != null && !product.getSku().isBlank()) {
+                productMap.put(product.getSku().toLowerCase(), product);
+            }
+            if (product.getBarcode() != null && !product.getBarcode().isBlank()) {
+                productMap.put(product.getBarcode().toLowerCase(), product);
+            }
+        }
+        return productMap;
+    }
+
+    private String buildSenderAddress() {
+        String address = Objects.toString(senderAddress, "").trim();
+        String detail = Objects.toString(senderAddressDetail, "").trim();
+        if (address.isBlank()) {
+            return "";
+        }
+        if (detail.isBlank()) {
+            return address;
+        }
+        return address + " " + detail;
     }
 
 }

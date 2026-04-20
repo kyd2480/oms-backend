@@ -89,6 +89,9 @@ tracking:
     office-ser: ${POST_OFFICE_OFFICE_SER:}
     order-company-name: ${POST_OFFICE_ORDER_COMPANY_NAME:OMS}
     inquiry-tel: ${POST_OFFICE_INQUIRY_TEL:}
+    sender-zip: ${POST_OFFICE_SENDER_ZIP:}
+    sender-address: ${POST_OFFICE_SENDER_ADDRESS:}
+    sender-address-detail: ${POST_OFFICE_SENDER_ADDRESS_DETAIL:}
     content-code: ${POST_OFFICE_CONTENT_CODE:029}
     default-weight: ${POST_OFFICE_DEFAULT_WEIGHT:1}
     default-volume: ${POST_OFFICE_DEFAULT_VOLUME:60}
