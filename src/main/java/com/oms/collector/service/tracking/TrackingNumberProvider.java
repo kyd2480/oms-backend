@@ -13,8 +13,13 @@ package com.oms.collector.service.tracking;
  */
 public interface TrackingNumberProvider {
 
-    /** 송장번호 발급 결과 — trackingNo(등기번호) + reservationNo(우체국 예약번호, 취소 시 필요) */
-    record IssueResult(String trackingNo, String reservationNo) {}
+    /**
+     * 송장번호 발급 결과
+     * trackingNo  : 등기번호 (regiNo)
+     * reservationNo : 우체국 예약번호 (resNo, 취소 시 필요)
+     * reqYmd      : 신청일자 yyyyMMdd (취소 시 필요)
+     */
+    record IssueResult(String trackingNo, String reservationNo, String reqYmd) {}
 
     /**
      * 송장번호 단건 발급
@@ -33,10 +38,11 @@ public interface TrackingNumberProvider {
      * @param carrierName    택배사명
      * @param orderNo        주문번호
      * @param trackingNo     등기번호 (regiNo)
-     * @param reservationNo  예약번호 (resNo, 우체국 cancel 필수)
+     * @param reservationNo  예약번호 (resNo)
+     * @param reqYmd         신청일자 yyyyMMdd
      */
     default void cancel(String carrierCode, String carrierName, String orderNo,
-                        String trackingNo, String reservationNo) {
+                        String trackingNo, String reservationNo, String reqYmd) {
         if (!supports(carrierCode)) {
             throw new UnsupportedOperationException("해당 택배사 송장취소를 지원하지 않습니다: " + carrierCode);
         }

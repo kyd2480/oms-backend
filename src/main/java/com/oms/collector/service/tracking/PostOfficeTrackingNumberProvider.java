@@ -112,7 +112,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
 
     @Override
     public void cancel(String carrierCode, String carrierName, String orderNo,
-                       String trackingNo, String reservationNo) {
+                       String trackingNo, String reservationNo, String reqYmd) {
         if (!"POST".equals(carrierCode)) {
             throw new UnsupportedOperationException(
                 "PostOfficeTrackingNumberProvider는 우체국(POST)만 지원합니다. 요청 택배사: " + carrierCode
@@ -129,6 +129,9 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         fields.put("reqNo", orderNo);
         if (StringUtils.hasText(reservationNo)) {
             fields.put("resNo", reservationNo);
+        }
+        if (StringUtils.hasText(reqYmd)) {
+            fields.put("reqYmd", reqYmd);
         }
         fields.put("regiNo", trackingNo);
 
@@ -151,8 +154,9 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
 
         String trackingNo = getRequiredTagValue(xml, "regiNo");
         String reservationNo = getOptionalTagValue(xml, "resNo");
-        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, resNo={}", orderNo, trackingNo, reservationNo);
-        return new IssueResult(trackingNo, reservationNo);
+        String reqYmd = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, resNo={}, reqYmd={}", orderNo, trackingNo, reservationNo, reqYmd);
+        return new IssueResult(trackingNo, reservationNo, reqYmd);
     }
 
     private void validateConfiguration() {
