@@ -6,6 +6,7 @@ import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.postoffice.DeliveryAreaCodeService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class InvoiceController {
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
+    private final DeliveryAreaCodeService deliveryAreaCodeService;
     private final TrackingNumberProvider trackingNumberProvider;
 
     @Value("${tracking.post-office.order-company-name:}")
@@ -124,6 +126,9 @@ public class InvoiceController {
         public String senderAddress;
         public String senderRoutePrimary;
         public String senderRouteSecondary;
+        public String deliveryAreaCode;
+        public String arrivalCenterName;
+        public String deliveryPostOfficeName;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
@@ -137,7 +142,8 @@ public class InvoiceController {
 
         public InvoiceOrderDTO(Order o, Map<String, Product> productMap, String senderCompanyName,
                                String senderContact, String senderZip, String senderAddress,
-                               String senderRoutePrimary, String senderRouteSecondary) {
+                               String senderRoutePrimary, String senderRouteSecondary,
+                               String deliveryAreaCode, String arrivalCenterName, String deliveryPostOfficeName) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
@@ -151,6 +157,9 @@ public class InvoiceController {
             this.senderAddress = senderAddress != null ? senderAddress : "";
             this.senderRoutePrimary = senderRoutePrimary != null ? senderRoutePrimary : "";
             this.senderRouteSecondary = senderRouteSecondary != null ? senderRouteSecondary : "";
+            this.deliveryAreaCode = deliveryAreaCode != null ? deliveryAreaCode : "";
+            this.arrivalCenterName = arrivalCenterName != null ? arrivalCenterName : "";
+            this.deliveryPostOfficeName = deliveryPostOfficeName != null ? deliveryPostOfficeName : "";
             this.productName   = o.getItems().isEmpty() ? "" :
                 o.getItems().stream()
                     .filter(i -> i.getActiveQuantity() > 0)
@@ -350,8 +359,7 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
-                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -450,8 +458,7 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
-                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .filter(dto -> dto.hasInvoice)
             .collect(Collectors.toList());
 
@@ -583,8 +590,7 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(order -> new InvoiceOrderDTO(order, productMap, senderCompanyName, senderContact, senderZip, fullSenderAddress,
-                buildSenderRoutePrimary(), buildSenderRouteSecondary()))
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -740,6 +746,62 @@ public class InvoiceController {
             return "";
         }
         return "승인 " + contractApprovalNo.trim();
+    }
+
+    @GetMapping("/delivery-area-preview")
+    public ResponseEntity<Map<String, Object>> previewDeliveryArea(
+        @RequestParam String zip,
+        @RequestParam String addr
+    ) {
+        DeliveryAreaCodeService.DeliveryAreaInfo info = deliveryAreaCodeService.lookup(zip, addr);
+        return ResponseEntity.ok(Map.of(
+            "configured", deliveryAreaCodeService.isConfigured(),
+            "zip", zip,
+            "addr", addr,
+            "deliveryAreaCode", info.deliveryAreaCode(),
+            "arrivalCenterName", info.arrivalCenterName(),
+            "deliveryPostOfficeName", info.deliveryPostOfficeName(),
+            "primaryLine", info.toPrimaryLine(),
+            "secondaryLine", info.toSecondaryLine()
+        ));
+    }
+
+    private InvoiceOrderDTO toInvoiceOrderDTO(Order order, Map<String, Product> productMap, String fullSenderAddress) {
+        DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo =
+            deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
+
+        String senderRoutePrimary = deliveryAreaInfo.hasValue()
+            ? deliveryAreaInfo.toPrimaryLine()
+            : buildSenderRoutePrimary();
+        String senderRouteSecondary = deliveryAreaInfo.hasValue()
+            ? deliveryAreaInfo.toSecondaryLine()
+            : buildSenderRouteSecondary();
+
+        return new InvoiceOrderDTO(
+            order,
+            productMap,
+            senderCompanyName,
+            senderContact,
+            senderZip,
+            fullSenderAddress,
+            senderRoutePrimary,
+            senderRouteSecondary,
+            deliveryAreaInfo.deliveryAreaCode(),
+            deliveryAreaInfo.arrivalCenterName(),
+            deliveryAreaInfo.deliveryPostOfficeName()
+        );
+    }
+
+    private String buildRecipientAddress(Order order) {
+        String address = Objects.toString(order.getAddress(), "").trim();
+        String detail = Objects.toString(order.getAddressDetail(), "").trim();
+        if (address.isBlank()) {
+            return "";
+        }
+        if (detail.isBlank()) {
+            return address;
+        }
+        return address + " " + detail;
     }
 
 }

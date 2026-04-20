@@ -128,3 +128,8 @@ tracking:
     default-volume: ${POST_OFFICE_DEFAULT_VOLUME:60}
     print-yn: ${POST_OFFICE_PRINT_YN:N}
     test-yn: ${POST_OFFICE_TEST_YN:N}
+    delivery-area:
+      enabled: ${POST_OFFICE_DELIVERY_AREA_ENABLED:true}
+      base-url: ${POST_OFFICE_DELIVERY_AREA_BASE_URL:http://biz.epost.go.kr/KpostPortal/openapi}
+      regkey: ${POST_OFFICE_DELIVERY_AREA_REGKEY:}
+      mdiv: ${POST_OFFICE_DELIVERY_AREA_MDIV:1}
