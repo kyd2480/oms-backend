@@ -56,7 +56,18 @@ public class DeliveryAreaCodeService {
         }
 
         String cacheKey = zip + "|" + address;
-        return cache.computeIfAbsent(cacheKey, key -> request(zip, address));
+        DeliveryAreaInfo cached = cache.get(cacheKey);
+        if (cached != null && cached.hasValue()) {
+            return cached;
+        }
+
+        DeliveryAreaInfo resolved = requestWithRetry(zip, address);
+        if (resolved.hasValue()) {
+            cache.put(cacheKey, resolved);
+        } else {
+            cache.remove(cacheKey);
+        }
+        return resolved;
     }
 
     public boolean isConfigured() {
@@ -65,6 +76,23 @@ public class DeliveryAreaCodeService {
 
     public String getLastErrorMessage() {
         return lastErrorMessage;
+    }
+
+    private DeliveryAreaInfo requestWithRetry(String zip, String address) {
+        DeliveryAreaInfo lastInfo = DeliveryAreaInfo.empty();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            lastInfo = request(zip, address);
+            if (lastInfo.hasValue()) {
+                return lastInfo;
+            }
+            try {
+                Thread.sleep(150L * attempt);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return lastInfo;
     }
 
     private DeliveryAreaInfo request(String zip, String address) {
