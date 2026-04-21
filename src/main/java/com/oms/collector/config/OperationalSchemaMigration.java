@@ -16,6 +16,8 @@ public class OperationalSchemaMigration {
     @PostConstruct
     public void migrate() {
         migrateOrders();
+        migrateOrderItems();
+        migrateProducts();
         migratePrintTypes();
         log.info("운영 스키마 보정 완료");
     }
@@ -27,6 +29,13 @@ public class OperationalSchemaMigration {
         execute("ALTER TABLE orders ALTER COLUMN shipping_hold SET NOT NULL");
 
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS hold_reason TEXT");
+
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS market_sync_status VARCHAR(20)");
+        execute("ALTER TABLE orders ALTER COLUMN market_sync_status SET DEFAULT 'NOT_REQUIRED'");
+        execute("UPDATE orders SET market_sync_status = 'NOT_REQUIRED' WHERE market_sync_status IS NULL OR market_sync_status = ''");
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS market_sync_message TEXT");
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS market_sync_attempted_at TIMESTAMP");
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS market_synced_at TIMESTAMP");
 
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS priority_allocation BOOLEAN");
         execute("ALTER TABLE orders ALTER COLUMN priority_allocation SET DEFAULT FALSE");
@@ -48,6 +57,27 @@ public class OperationalSchemaMigration {
 
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS merged_into_order_no VARCHAR(100)");
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS split_from_order_no VARCHAR(100)");
+    }
+
+    private void migrateOrderItems() {
+        execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cancelled_quantity INTEGER");
+        execute("ALTER TABLE order_items ALTER COLUMN cancelled_quantity SET DEFAULT 0");
+        execute("UPDATE order_items SET cancelled_quantity = 0 WHERE cancelled_quantity IS NULL");
+        execute("ALTER TABLE order_items ALTER COLUMN cancelled_quantity SET NOT NULL");
+
+        execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(20)");
+        execute("ALTER TABLE order_items ALTER COLUMN item_status SET DEFAULT 'ACTIVE'");
+        execute("UPDATE order_items SET item_status = 'ACTIVE' WHERE item_status IS NULL OR item_status = ''");
+        execute("ALTER TABLE order_items ALTER COLUMN item_status SET NOT NULL");
+
+        execute("ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cancel_reason TEXT");
+    }
+
+    private void migrateProducts() {
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_code VARCHAR(100)");
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_name VARCHAR(255)");
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)");
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS note VARCHAR(500)");
     }
 
     private void migratePrintTypes() {
