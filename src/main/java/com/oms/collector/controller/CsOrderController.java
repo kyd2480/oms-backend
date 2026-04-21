@@ -2,6 +2,7 @@ package com.oms.collector.controller;
 
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
+import com.oms.collector.repository.OrderItemRepository;
 import com.oms.collector.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
 public class CsOrderController {
 
     private final OrderRepository orderRepository;
+    private final OrderItemRepository orderItemRepository;
 
     public static class CsOrderDTO {
         public String  orderNo;
@@ -313,32 +315,35 @@ public class CsOrderController {
         source.getItems().size();
         Set<UUID> selectedIds = request.itemIds.stream()
             .map(id -> {
-                try { return UUID.fromString(id); } catch (Exception e) { return null; }
+                try { return UUID.fromString(id); }
+                catch (Exception e) { return null; }
             })
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
-        List<OrderItem> selected = source.getItems().stream()
+        long selectedCount = source.getItems().stream()
             .filter(item -> selectedIds.contains(item.getItemId()))
-            .collect(Collectors.toList());
-        if (selected.isEmpty() || selected.size() >= source.getItems().size()) {
+            .count();
+        if (selectedCount == 0 || selectedCount >= source.getItems().size()) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "일부 상품만 선택해야 주문을 나눌 수 있습니다."));
         }
+        // 1. split 주문 먼저 저장 (orderId 확보)
         Order split = cloneOrderHeader(source, nextSplitOrderNo(source.getOrderNo()));
         split.setSplitFromOrderNo(source.getOrderNo());
-        // split을 먼저 저장해 orderId(PK)를 확보한 뒤 아이템 이동
         orderRepository.saveAndFlush(split);
 
-        // orphanRemoval 오동작 방지: removeItem(order=null) 대신 직접 참조 변경
-        for (OrderItem item : selected) {
-            source.getItems().remove(item);
-            item.setOrder(split);
-            split.getItems().add(item);
-        }
-        recalcAmount(source);
-        recalcAmount(split);
-        orderRepository.save(source);
-        orderRepository.save(split);
-        return ResponseEntity.ok(Map.of("success", true, "message", "주문 나누기 완료", "order", toDTO(source), "newOrder", toDTO(split)));
+        // 2. JPQL UPDATE로 order_id FK 직접 변경 — orphanRemoval 충돌 없음
+        orderItemRepository.moveItemsToOrder(split, selectedIds);
+
+        // 3. 양쪽 주문 재조회 후 금액 재계산
+        Order freshSource = getOrder(orderNo);
+        Order freshSplit  = getOrder(split.getOrderNo());
+        recalcAmount(freshSource);
+        recalcAmount(freshSplit);
+        orderRepository.save(freshSource);
+        orderRepository.save(freshSplit);
+
+        return ResponseEntity.ok(Map.of("success", true, "message", "주문 나누기 완료",
+            "order", toDTO(freshSource), "newOrder", toDTO(freshSplit)));
     }
 
     private List<Order> filterByKeyword(List<Order> orders, String searchType, String kw) {

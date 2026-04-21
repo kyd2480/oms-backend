@@ -3,11 +3,13 @@ package com.oms.collector.repository;
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -41,4 +43,8 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
      */
     @Query("SELECT SUM(oi.quantity) FROM OrderItem oi WHERE oi.order = :order")
     Long getTotalQuantityByOrder(@Param("order") Order order);
+
+    @Modifying
+    @Query("UPDATE OrderItem i SET i.order = :newOrder WHERE i.itemId IN :itemIds")
+    void moveItemsToOrder(@Param("newOrder") Order newOrder, @Param("itemIds") Set<UUID> itemIds);
 }
