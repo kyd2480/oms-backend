@@ -7,12 +7,16 @@ import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.market.MarketShipmentSyncService;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -33,8 +37,11 @@ import java.util.*;
 @RequestMapping("/api/allocation")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
+@DependsOn("operationalSchemaMigration")
 public class AllocationController {
     private static final String INVOICE_PREFIX = "INVOICE:";
+    private static final String SETTING_WAREHOUSE_CODE = "allocation.warehouseCode";
+    private static final String SETTING_WAREHOUSE_NAME = "allocation.warehouseName";
 
     private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
@@ -42,6 +49,7 @@ public class AllocationController {
     private final ProductRepository productRepository;
     private final InventoryService  inventoryService;
     private final MarketShipmentSyncService marketShipmentSyncService;
+    private final JdbcTemplate jdbcTemplate;
 
     // ─── 인메모리 창고 설정 저장 (간단한 구현) ────────────────
     // 실제 운영 시 DB 테이블로 관리 권장
@@ -52,12 +60,18 @@ public class AllocationController {
     public static String getCurrentWarehouseCode() { return selectedWarehouseCode; }
     public static String getCurrentWarehouseName() { return selectedWarehouseName; }
 
+    @PostConstruct
+    public void loadPersistedWarehouse() {
+        refreshSelectedWarehouseFromDb();
+    }
+
     /**
      * 현재 할당 창고 조회
      * GET /api/allocation/current
      */
     @GetMapping("/current")
     public ResponseEntity<Map<String, Object>> getCurrent() {
+        refreshSelectedWarehouseFromDb();
         return ResponseEntity.ok(Map.of(
             "warehouseCode", selectedWarehouseCode != null ? selectedWarehouseCode : "",
             "warehouseName", selectedWarehouseName != null ? selectedWarehouseName : "",
@@ -81,6 +95,8 @@ public class AllocationController {
 
         selectedWarehouseCode = code;
         selectedWarehouseName = name != null ? name : code;
+        saveSetting(SETTING_WAREHOUSE_CODE, selectedWarehouseCode);
+        saveSetting(SETTING_WAREHOUSE_NAME, selectedWarehouseName);
 
         log.info("할당 창고 설정: {} ({})", selectedWarehouseName, selectedWarehouseCode);
         return ResponseEntity.ok(Map.of(
@@ -115,6 +131,8 @@ public class AllocationController {
         // static 변수도 최신 값으로 업데이트
         selectedWarehouseCode = warehouseCode;
         if (warehouseName != null) selectedWarehouseName = warehouseName;
+        saveSetting(SETTING_WAREHOUSE_CODE, selectedWarehouseCode);
+        saveSetting(SETTING_WAREHOUSE_NAME, selectedWarehouseName != null ? selectedWarehouseName : selectedWarehouseCode);
 
         log.info("재고 실차감 (검수발송): {} / 창고: {}", orderNo, warehouseCode);
 
@@ -233,6 +251,38 @@ public class AllocationController {
             .filter(p -> item.getProductCode().equalsIgnoreCase(p.getSku())
                       || item.getProductCode().equalsIgnoreCase(p.getBarcode()))
             .findFirst().orElse(found.isEmpty() ? null : found.get(0));
+    }
+
+    private void refreshSelectedWarehouseFromDb() {
+        String code = readSetting(SETTING_WAREHOUSE_CODE);
+        if (code == null || code.isBlank()) {
+            return;
+        }
+        selectedWarehouseCode = code;
+        String name = readSetting(SETTING_WAREHOUSE_NAME);
+        selectedWarehouseName = (name != null && !name.isBlank()) ? name : code;
+    }
+
+    private String readSetting(String key) {
+        try {
+            return jdbcTemplate.queryForObject(
+                "SELECT setting_value FROM operational_settings WHERE setting_key = ?",
+                String.class,
+                key
+            );
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
+    }
+
+    private void saveSetting(String key, String value) {
+        jdbcTemplate.update("""
+            INSERT INTO operational_settings (setting_key, setting_value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (setting_key)
+            DO UPDATE SET setting_value = EXCLUDED.setting_value,
+                          updated_at = CURRENT_TIMESTAMP
+            """, key, value);
     }
 
     private static InvoiceInfo extractInvoiceInfo(String memo) {

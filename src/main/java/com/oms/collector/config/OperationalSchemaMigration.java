@@ -15,11 +15,23 @@ public class OperationalSchemaMigration {
 
     @PostConstruct
     public void migrate() {
+        migrateOperationalSettings();
         migrateOrders();
         migrateOrderItems();
         migrateProducts();
         migratePrintTypes();
         log.info("운영 스키마 보정 완료");
+    }
+
+    private void migrateOperationalSettings() {
+        execute("""
+            CREATE TABLE IF NOT EXISTS operational_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """);
     }
 
     private void migrateOrders() {
