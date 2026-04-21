@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { formatOrderSummary, formatProductLabel } from '../lib/orderDisplay';
 
 const API_BASE = import.meta.env.VITE_API_URL?.replace('/api/processing','') ||
                  'https://oms-backend-production-8a38.up.railway.app';
@@ -121,10 +122,11 @@ function CompleteModal({ order, onConfirm, onCancel }) {
  * ══════════════════════════════════════════════════════════ */
 export default function InspectShip() {
   const [mainTab,     setMainTab]     = useState('ship');
-  const [allOrders,   setAllOrders]   = useState([]);
+  const [completedOrders, setCompletedOrders] = useState([]);   // 송장삭제 탭 전용 (lazy)
+  const [completedLoaded, setCompletedLoaded] = useState(false);
   const [shipped,     setShipped]     = useState([]);
-  const [warehouses,        setWarehouses]        = useState([]);   // 창고 목록
-  const [selectedWarehouse, setSelectedWarehouse] = useState(null); // 선택된 출고 창고
+  const [warehouses,        setWarehouses]        = useState([]);
+  const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [loading,     setLoading]     = useState(false);
 
   const [phase,        setPhase]        = useState('idle');
@@ -143,10 +145,10 @@ export default function InspectShip() {
    */
 
   const [scanInput,    setScanInput]    = useState('');
+  const [scanLoading,  setScanLoading]  = useState(false);
   const [toast,        setToast]        = useState({ msg:'', type:'success' });
   const [completeModal,setCompleteModal]= useState(null);
   const [progress,     setProgress]     = useState({ show:false, current:0, total:0 });
-  const [search,       setSearch]       = useState('');
   const [cancelSearch, setCancelSearch] = useState('');
   const [cancelSel,    setCancelSel]    = useState(new Set());
   const [delSearch,    setDelSearch]    = useState('');
@@ -160,13 +162,6 @@ export default function InspectShip() {
   const [obSearch,  setObSearch]  = useState('');
   const [obLoading, setObLoading] = useState(false);
 
-  // 송장출력내역 탭
-  const [prStart,   setPrStart]   = useState(todayStr);
-  const [prEnd,     setPrEnd]     = useState(todayStr);
-  const [prList,    setPrList]    = useState([]);
-  const [prSearch,  setPrSearch]  = useState('');
-  const [prLoading, setPrLoading] = useState(false);
-
   const fetchOutboundHistory = useCallback(async (start, end) => {
     setObLoading(true);
     try {
@@ -175,16 +170,6 @@ export default function InspectShip() {
       setObList(Array.isArray(data) ? data : []);
     } catch(e) { console.error(e); }
     finally { setObLoading(false); }
-  }, []);
-
-  const fetchPrintHistory = useCallback(async (start, end) => {
-    setPrLoading(true);
-    try {
-      const res  = await fetch(`${API_BASE}/api/invoice/completed?startDate=${start}&endDate=${end}`);
-      const data = await res.json();
-      setPrList(Array.isArray(data) ? data : []);
-    } catch(e) { console.error(e); }
-    finally { setPrLoading(false); }
   }, []);
 
   const scanRef = useRef(null);
@@ -219,27 +204,36 @@ export default function InspectShip() {
     } catch(e) { console.error('창고 목록 로드 실패', e); }
   }, []);
 
-  /* ── 초기 로드 ─────────────────────────────────────────── */
-  const reloadAll = useCallback(async () => {
+  /* ── 당일 출고 목록 로드 (발송취소·출고목록 패널용) ─── */
+  const reloadShipped = useCallback(async () => {
     setLoading(true);
     try {
-      const [r1, r2] = await Promise.all([
-        fetch(`${API_BASE}/api/invoice/completed`),
-        fetch(`${API_BASE}/api/invoice/shipped`),
-      ]);
-      const d1 = await r1.json();
-      setAllOrders(Array.isArray(d1) ? d1 : []);
-      if (r2.ok) {
-        const d2 = await r2.json();
-        setShipped(Array.isArray(d2) ? d2 : []);
-      }
+      const res  = await fetch(`${API_BASE}/api/invoice/shipped`);
+      const data = await res.json();
+      setShipped(Array.isArray(data) ? data : []);
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
 
+  /* ── 완료 목록 lazy 로드 (송장삭제 탭 전용) ─────────── */
+  const loadCompleted = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res  = await fetch(`${API_BASE}/api/invoice/completed`);
+      const data = await res.json();
+      setCompletedOrders(Array.isArray(data) ? data : []);
+      setCompletedLoaded(true);
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  const reloadAll = useCallback(async () => {
+    await Promise.all([reloadShipped(), loadCompleted()]);
+  }, [reloadShipped, loadCompleted]);
+
   useEffect(() => {
     loadWarehouses();
-    reloadAll();
+    reloadShipped();
   }, []);
 
   /* ── 주문 → 상품 행 빌드 ──────────────────────────────── */
@@ -289,28 +283,35 @@ export default function InspectShip() {
   /* ─────────────────────────────────────────────────────────
    * 핵심 스캔 핸들러
    * ─────────────────────────────────────────────────────── */
-  const handleScan = useCallback(() => {
+  const handleScan = useCallback(async () => {
     const val = scanInput.trim();
     if (!val) return;
     setScanInput('');
 
-    /* ① idle → invoice : 송장/주문번호 스캔 */
+    /* ① idle → invoice : 송장/주문번호 스캔 → API 단건 조회 */
     if (phase === 'idle') {
-      const found = allOrders.find(o =>
-        o.trackingNo === val || o.orderNo === val
-      );
-      if (!found) {
-        showToast(`'${val}' — 해당 송장/주문을 찾을 수 없습니다`, 'error');
-        return;
+      setScanLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/api/invoice/find?q=${encodeURIComponent(val)}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          showToast(body.message || `'${val}' — 해당 송장/주문을 찾을 수 없습니다`, 'error');
+          return;
+        }
+        const found = await res.json();
+        const rows = buildItemRows(found);
+        setActiveOrder(found);
+        setItemRows(rows);
+        setPhase('invoice');
+        showToast(
+          `송장 확인 ✅  ${found.trackingNo} | ${found.recipientName} — 상품 바코드를 스캔하세요`,
+          'info'
+        );
+      } catch {
+        showToast('주문 조회 중 오류가 발생했습니다', 'error');
+      } finally {
+        setScanLoading(false);
       }
-      const rows = buildItemRows(found);
-      setActiveOrder(found);
-      setItemRows(rows);
-      setPhase('invoice');
-      showToast(
-        `송장 확인 ✅  ${found.trackingNo} | ${found.recipientName} — 상품 바코드를 스캔하세요`,
-        'info'
-      );
       return;
     }
 
@@ -350,10 +351,11 @@ export default function InspectShip() {
         });
 
         const row = next[targetIdx];
+        const rowLabel = formatProductLabel(row.productName, row.option);
         if (row.done) {
-          showToast(`✅ [${row.productName}] 완료 (${row.requiredQty}/${row.requiredQty})`, 'success');
+          showToast(`✅ [${rowLabel}] 완료 (${row.requiredQty}/${row.requiredQty})`, 'success');
         } else {
-          showToast(`📦 [${row.productName}] ${row.scannedQty}/${row.requiredQty}`, 'info');
+          showToast(`📦 [${rowLabel}] ${row.scannedQty}/${row.requiredQty}`, 'info');
         }
 
         // 전체 완료 확인
@@ -371,21 +373,7 @@ export default function InspectShip() {
 
     /* ③ done : 완료 후 추가 스캔 방지 */
     showToast('검수 완료 상태입니다. 출고 처리 후 다음 송장을 스캔하세요', 'warn');
-  }, [scanInput, phase, allOrders, activeOrder]);
-
-  /* 행 클릭으로 검수 시작 (idle 상태에서) */
-  const startByClick = useCallback((order) => {
-    if (phase !== 'idle') return;
-    const rows = buildItemRows(order);
-    setActiveOrder(order);
-    setItemRows(rows);
-    setPhase('invoice');
-    showToast(
-      `송장 확인 ✅  ${order.trackingNo} | ${order.recipientName} — 상품 바코드를 스캔하세요`,
-      'info'
-    );
-    setTimeout(() => scanRef.current?.focus(), 50);
-  }, [phase]);
+  }, [scanInput, phase, activeOrder]);
 
   /* ── 출고 처리 ─────────────────────────────────────────── */
   const doShip = async (order) => {
@@ -394,12 +382,36 @@ export default function InspectShip() {
     setLoading(true);
     setProgress({ show:true, current:0, total:1 });
     try {
-      const res  = await fetch(`${API_BASE}/api/allocation/confirm/${order.orderNo}`, { method:'POST' });
-      const data = await res.json();
+      // 창고 먼저 서버에 등록 (서버 재시작 후 static 변수 초기화 대비)
+      await fetch(`${API_BASE}/api/allocation/set-warehouse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          warehouseCode: selectedWarehouse.code,
+          warehouseName: selectedWarehouse.name,
+        }),
+      });
+
+      const res  = await fetch(`${API_BASE}/api/allocation/confirm/${order.orderNo}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          warehouseCode: selectedWarehouse.code,
+          warehouseName: selectedWarehouse.name,
+        }),
+      });
       setProgress({ show:true, current:1, total:1 });
-      if (data.success) {
-        showToast(`🚚 출고 완료: ${order.trackingNo} (${order.recipientName})`, 'success');
-        await reloadAll();  // 서버 SHIPPED 목록 갱신 → shipped state에 반영
+      const data = await res.json().catch(() => ({}));
+      await reloadShipped();
+      if (res.ok && data.success !== false) {
+        const syncMessage = data.marketSyncMessage ? ` / 판매처: ${data.marketSyncMessage}` : '';
+        showToast(
+          `🚚 출고 완료: ${order.trackingNo} (${order.recipientName})${syncMessage}`,
+          data.marketSyncSuccess === false ? 'warn' : 'success'
+        );
+      } else if (!res.ok) {
+        // 서버 오류여도 실제 처리됐을 수 있으므로 목록 확인 안내
+        showToast(`출고 처리됨 — 출고 목록(당일)에서 확인해주세요`, 'warn');
       } else {
         showToast(`출고 실패: ${data.message || '알 수 없는 오류'}`, 'error');
       }
@@ -427,7 +439,7 @@ export default function InspectShip() {
     }
     showToast(`발송취소 완료: ${ok}건${fail ? ` (실패 ${fail}건)` : ''}`, ok ? 'success' : 'error');
     setCancelSel(new Set());
-    await reloadAll();
+    await reloadShipped();
     setLoading(false);
   };
 
@@ -446,7 +458,7 @@ export default function InspectShip() {
     }
     showToast(`송장삭제 완료: ${ok}건${fail ? ` (실패 ${fail}건)` : ''}`, ok ? 'success' : 'error');
     setDelSel(new Set());
-    await reloadAll();
+    await loadCompleted();
     setLoading(false);
   };
 
@@ -454,12 +466,6 @@ export default function InspectShip() {
   const doneCount    = itemRows.filter(r => r.done).length;
   const totalCount   = itemRows.length;
   const scanProgress = totalCount === 0 ? 0 : Math.round(doneCount / totalCount * 100);
-  const filteredOrders = allOrders.filter(o => {
-    if (!search) return true;
-    const kw = search.toLowerCase();
-    return [o.orderNo, o.recipientName, o.productName, o.trackingNo]
-      .some(v => v?.toLowerCase().includes(kw));
-  });
 
   /* ══════════════════════════════════════════════════════════
    *  RENDER
@@ -484,7 +490,6 @@ export default function InspectShip() {
           { key:'cancel',         label:'발송취소' },
           { key:'deleteInv',      label:'송장삭제' },
           { key:'outboundHistory',label:'출고내역' },
-          { key:'invoicePrint',   label:'송장출력내역' },
         ].map(t => (
           <button key={t.key} onClick={() => setMainTab(t.key)} style={{
             padding:'7px 16px', border:'1px solid',
@@ -537,7 +542,7 @@ export default function InspectShip() {
                   onClick={() => doCancel([...cancelSel])} disabled={!cancelSel.size || loading}>
                   ↩ {cancelSel.size}건 발송취소
                 </button>
-                <button style={C.btn('#757575','#fff')} onClick={reloadAll} disabled={loading}>🔄</button>
+                <button style={C.btn('#757575','#fff')} onClick={reloadShipped} disabled={loading}>🔄</button>
               </div>
               <div style={{ overflowY:'auto', maxHeight:'calc(100vh - 220px)' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
@@ -589,7 +594,7 @@ export default function InspectShip() {
                         </td>
                         <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
                         <td style={{ ...C.td, textAlign:'left', maxWidth:180,
-                          overflow:'hidden', textOverflow:'ellipsis' }}>{o.productName||'-'}</td>
+                          overflow:'hidden', textOverflow:'ellipsis' }}>{formatOrderSummary(o)}</td>
                         <td style={C.td}>
                           <Badge text={o.carrierName||'-'} bg="#e8f5e9" color="#2e7d32"/>
                         </td>
@@ -608,8 +613,8 @@ export default function InspectShip() {
 
       {/* ── 송장삭제 탭 ────────────────────────────────────── */}
       {mainTab === 'deleteInv' && (() => {
-        // 송장 있는 CONFIRMED 주문 대상
-        const list = allOrders.filter(o => {
+        if (!completedLoaded) loadCompleted();
+        const list = completedOrders.filter(o => {
           if (!o.hasInvoice) return false;
           if (!delSearch) return true;
           const kw = delSearch.toLowerCase();
@@ -641,7 +646,7 @@ export default function InspectShip() {
                   onClick={() => doDeleteInvoice([...delSel])} disabled={!delSel.size || loading}>
                   🗑 {delSel.size}건 송장삭제
                 </button>
-                <button style={C.btn('#757575','#fff')} onClick={reloadAll} disabled={loading}>🔄</button>
+                <button style={C.btn('#757575','#fff')} onClick={loadCompleted} disabled={loading}>🔄</button>
               </div>
               <div style={{ overflowY:'auto', maxHeight:'calc(100vh - 220px)' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
@@ -690,7 +695,7 @@ export default function InspectShip() {
                         </td>
                         <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
                         <td style={{ ...C.td, textAlign:'left', maxWidth:180,
-                          overflow:'hidden', textOverflow:'ellipsis' }}>{o.productName||'-'}</td>
+                          overflow:'hidden', textOverflow:'ellipsis' }}>{formatOrderSummary(o)}</td>
                         <td style={C.td}>{o.quantity||0}</td>
                         <td style={C.td}>
                           <Badge text={o.carrierName||'-'} bg="#e8f5e9" color="#2e7d32"/>
@@ -930,74 +935,36 @@ export default function InspectShip() {
                   대기 목록 (송장의 재고매칭내역)
                 </span>
                 <div style={{ flex:1 }}/>
-                <span style={{ fontSize:'0.75rem', color:'#777' }}>
-                  {phase === 'idle'
-                    ? `총주문수:${filteredOrders.length}건`
-                    : `총주문수:${filteredOrders.length}건 / 총스캔수:${doneCount}건`}
-                </span>
+                {phase !== 'idle' && (
+                  <span style={{ fontSize:'0.75rem', color:'#777' }}>
+                    총스캔수: {doneCount}건
+                  </span>
+                )}
                 <button style={{ ...C.btn('#757575'), fontSize:'0.75rem', padding:'2px 8px' }}
-                  onClick={reloadAll} disabled={loading}>🔄</button>
+                  onClick={reloadShipped} disabled={loading}>🔄</button>
               </div>
 
-              {/* ── PHASE idle: 전체 주문 리스트 ── */}
+              {/* ── PHASE idle: 스캔 대기 안내 ── */}
               {phase === 'idle' && (
-                <>
-                  <div style={{ padding:'5px 8px', borderBottom:C.borderB }}>
-                    <input value={search} onChange={e => setSearch(e.target.value)}
-                      placeholder="주문번호, 수취인, 송장번호..."
-                      style={{ ...C.inp, width:'100%', boxSizing:'border-box' }}/>
-                  </div>
-                  <div style={{ overflowY:'auto', maxHeight:420 }}>
-                    <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                      <thead style={{ position:'sticky', top:0 }}>
-                        <tr>
-                          {['순번','쇼핑몰','수취인','상품명','수량','송장번호','택배사'].map(h => (
-                            <th key={h} style={C.th}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {loading ? (
-                          <tr><td colSpan={7} style={{ ...C.td, padding:'2.5rem', color:'#aaa' }}>
-                            ⏳ 로딩 중...
-                          </td></tr>
-                        ) : filteredOrders.length === 0 ? (
-                          <tr><td colSpan={7} style={{ ...C.td, padding:'2.5rem', color:'#bbb' }}>
-                            <div style={{ fontSize:'1.5rem', marginBottom:6 }}>📭</div>
-                            발송 대기 주문이 없습니다
-                          </td></tr>
-                        ) : filteredOrders.map((o, idx) => (
-                          <tr key={o.orderNo}
-                            onClick={() => startByClick(o)}
-                            title="클릭 또는 송장번호 스캔으로 검수 시작"
-                            style={{ background:idx%2===0?'#fff':'#fafafa',
-                              cursor:'pointer', transition:'background 0.1s' }}
-                            onMouseEnter={e => e.currentTarget.style.background='#e3f2fd'}
-                            onMouseLeave={e => e.currentTarget.style.background=idx%2===0?'#fff':'#fafafa'}>
-                            <td style={{ ...C.td, color:'#aaa' }}>{idx+1}</td>
-                            <td style={C.td}>
-                              {o.channelName
-                                ? <Badge text={o.channelName} bg="#e3f2fd" color="#1565c0"/>
-                                : <span style={{ color:'#ccc' }}>-</span>}
-                            </td>
-                            <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
-                            <td style={{ ...C.td, textAlign:'left', maxWidth:140,
-                              overflow:'hidden', textOverflow:'ellipsis' }}>
-                              {o.productName||'-'}
-                            </td>
-                            <td style={C.td}>{o.quantity||0}</td>
-                            <td style={{ ...C.td, color:'#1565c0', fontWeight:600, fontSize:'0.74rem' }}>
-                              {o.trackingNo||'-'}
-                            </td>
-                            <td style={C.td}>
-                              <Badge text={o.carrierName||'-'} bg="#e8f5e9" color="#2e7d32"/>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                  justifyContent:'center', minHeight:240, color:'#bbb', gap:10 }}>
+                  {scanLoading ? (
+                    <>
+                      <div style={{ fontSize:'2rem' }}>🔍</div>
+                      <div style={{ fontSize:'0.85rem', color:'#999' }}>주문 조회 중...</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize:'2.5rem' }}>📦</div>
+                      <div style={{ fontSize:'0.9rem', fontWeight:600, color:'#aaa' }}>
+                        송장번호를 스캔하면 상품 목록이 표시됩니다
+                      </div>
+                      <div style={{ fontSize:'0.78rem', color:'#ccc' }}>
+                        위 입력창에 송장번호 또는 주문번호 입력 후 Enter
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* ── PHASE invoice / done: 해당 송장 상품 스캔 ── */}
@@ -1168,7 +1135,7 @@ export default function InspectShip() {
                           <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
                           <td style={{ ...C.td, textAlign:'left', maxWidth:150,
                             overflow:'hidden', textOverflow:'ellipsis' }}>
-                            {o.productName||'-'}
+                            {formatOrderSummary(o)}
                           </td>
                           <td style={C.td}>
                             <Badge text={o.carrierName||'-'} bg="#e8f5e9" color="#2e7d32"/>
@@ -1246,77 +1213,9 @@ export default function InspectShip() {
                       </td>
                       <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
                       <td style={{ ...C.td, textAlign:'left', maxWidth:200,
-                        overflow:'hidden', textOverflow:'ellipsis' }}>{o.productName||'-'}</td>
+                        overflow:'hidden', textOverflow:'ellipsis' }}>{formatOrderSummary(o)}</td>
                       <td style={C.td}>{o.quantity||0}</td>
                       <td style={C.td}><Badge text={o.carrierName||'-'} bg="#e8f5e9" color="#2e7d32"/></td>
-                      <td style={{ ...C.td, color:'#1565c0', fontWeight:600, fontSize:'0.74rem' }}>{o.trackingNo||'-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 송장출력내역 탭 ──────────────────────────────── */}
-      {mainTab === 'invoicePrint' && (
-        <div style={{ padding:'8px 10px' }}>
-          <div style={{ background:'#fff', border:C.border, borderRadius:3 }}>
-            <div style={{ padding:'6px 10px', background:'#e3f2fd', borderBottom:C.border,
-              display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-              <span style={{ width:8, height:8, borderRadius:'50%', background:'#1565c0', display:'inline-block' }}/>
-              <span style={{ fontWeight:700, fontSize:'0.8rem', color:'#0d47a1' }}>송장출력내역</span>
-              <input type="date" value={prStart} onChange={e => setPrStart(e.target.value)} style={C.inp}/>
-              <span style={{ color:'#aaa' }}>~</span>
-              <input type="date" value={prEnd} onChange={e => setPrEnd(e.target.value)} style={C.inp}/>
-              <button style={C.btn('#1565c0')} onClick={() => fetchPrintHistory(prStart, prEnd)} disabled={prLoading}>
-                {prLoading ? '⏳' : '🔍 조회'}
-              </button>
-              <button style={C.btn('#1976d2')} onClick={() => {
-                const t = todayStr; setPrStart(t); setPrEnd(t);
-                fetchPrintHistory(t, t);
-              }}>당일</button>
-              <input value={prSearch} onChange={e => setPrSearch(e.target.value)}
-                placeholder="주문번호, 수취인, 송장번호..."
-                style={{ ...C.inp, minWidth:220, marginLeft:8 }}/>
-              <span style={{ fontSize:'0.78rem', color:'#555', marginLeft:'auto' }}>
-                {prList.length}건
-              </span>
-            </div>
-            <div style={{ overflowY:'auto', maxHeight:'calc(100vh - 200px)' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead style={{ position:'sticky', top:0 }}>
-                  <tr>
-                    {['순번','주문일시','쇼핑몰','수취인','상품명','수량','택배사','송장번호'].map(h => (
-                      <th key={h} style={C.th}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {prLoading ? (
-                    <tr><td colSpan={8} style={{ ...C.td, padding:'2.5rem', color:'#aaa' }}>⏳ 조회 중...</td></tr>
-                  ) : prList.length === 0 ? (
-                    <tr><td colSpan={8} style={{ ...C.td, padding:'2.5rem', color:'#bbb' }}>
-                      기간을 선택하고 조회하세요
-                    </td></tr>
-                  ) : prList.filter(o => {
-                    if (!prSearch) return true;
-                    const kw = prSearch.toLowerCase();
-                    return [o.orderNo, o.recipientName, o.productName, o.trackingNo]
-                      .some(v => v?.toLowerCase().includes(kw));
-                  }).map((o, idx) => (
-                    <tr key={o.orderNo} style={{ background:idx%2===0?'#fff':'#f0f4ff' }}>
-                      <td style={{ ...C.td, color:'#aaa' }}>{idx+1}</td>
-                      <td style={{ ...C.td, fontSize:'0.72rem', color:'#555' }}>{fmtDate(o.orderedAt)}</td>
-                      <td style={C.td}>
-                        {o.channelName ? <Badge text={o.channelName} bg="#e3f2fd" color="#1565c0"/> : '-'}
-                      </td>
-                      <td style={{ ...C.td, fontWeight:600 }}>{o.recipientName||'-'}</td>
-                      <td style={{ ...C.td, textAlign:'left', maxWidth:200,
-                        overflow:'hidden', textOverflow:'ellipsis' }}>{o.productName||'-'}</td>
-                      <td style={C.td}>{o.quantity||0}</td>
-                      <td style={C.td}><Badge text={o.carrierName||'-'} bg="#e3f2fd" color="#1565c0"/></td>
                       <td style={{ ...C.td, color:'#1565c0', fontWeight:600, fontSize:'0.74rem' }}>{o.trackingNo||'-'}</td>
                     </tr>
                   ))}

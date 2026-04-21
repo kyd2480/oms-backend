@@ -6,15 +6,19 @@ import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.postoffice.DeliveryAreaCodeService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
@@ -39,11 +43,40 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class InvoiceController {
+    private static final String INVOICE_PREFIX = "INVOICE:";
+    private static final String MESSAGE_PREFIX = "MESSAGE_B64:";
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
+    private final DeliveryAreaCodeService deliveryAreaCodeService;
     private final TrackingNumberProvider trackingNumberProvider;
+
+    @Value("${tracking.post-office.order-company-name:}")
+    private String senderCompanyName;
+
+    @Value("${tracking.post-office.inquiry-tel:}")
+    private String senderContact;
+
+    @Value("${tracking.post-office.sender-zip:}")
+    private String senderZip;
+
+    @Value("${tracking.post-office.sender-address:}")
+    private String senderAddress;
+
+    @Value("${tracking.post-office.sender-address-detail:}")
+    private String senderAddressDetail;
+
+    @Value("${tracking.post-office.office-ser:}")
+    private String officeSer;
+
+    @Value("${tracking.post-office.content-code:}")
+    private String contentCode;
+
+    @Value("${tracking.post-office.contract-approval-no:}")
+    private String contractApprovalNo;
+
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo, String poReqNo, String reservationNo, String reqYmd) {}
 
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
@@ -62,13 +95,21 @@ public class InvoiceController {
         public String productName;  // 상품명
         public String option;       // 옵션 (색상/사이즈 등)
         public String barcode;      // 바코드 (추후 OrderItem 엔티티에 필드 추가 시 활성화)
+        public String location;     // 재고 위치
         public int    quantity;     // 수량
+        public int    originalQuantity;
+        public int    cancelledQuantity;
+        public String itemStatus;
 
-        public OrderItemDTO(com.oms.collector.entity.OrderItem i) {
+        public OrderItemDTO(com.oms.collector.entity.OrderItem i, String location) {
             this.productName = i.getProductName();
             this.option      = i.getOptionName() != null ? i.getOptionName() : "";
             this.barcode     = i.getProductCode() != null ? i.getProductCode() : "";  // product_code = 바코드
-            this.quantity    = i.getQuantity()   != null ? i.getQuantity()   : 1;
+            this.location    = location != null ? location : "";
+            this.quantity    = i.getActiveQuantity();
+            this.originalQuantity = i.getQuantity() != null ? i.getQuantity() : 1;
+            this.cancelledQuantity = i.getCancelledQuantity() != null ? i.getCancelledQuantity() : 0;
+            this.itemStatus = i.getItemStatus() != null ? i.getItemStatus().name() : "ACTIVE";
         }
     }
 
@@ -77,45 +118,112 @@ public class InvoiceController {
         public String channelName;
         public String recipientName;
         public String recipientPhone;
+        public String postalCode;
         public String address;
+        public String senderCompanyName;
+        public String senderContact;
+        public String senderZip;
+        public String senderAddress;
+        public String senderRoutePrimary;
+        public String senderRouteSecondary;
+        public String deliveryAreaCode;
+        public String arrivalCenterName;
+        public String deliveryPostOfficeName;
+        public String deliveryCourseNo;
+        public String arrivalCenterCode;
+        public String deliveryPostOfficeCode;
+        public String deliveryTeamCode;
+        public String deliveryDistrictCode;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
+        public String invoiceIssuedAt;
         public String shippedAt;             // 출고(발송처리) 일시
         public String carrierCode;           // 택배사 코드
         public String carrierName;           // 택배사명
         public String trackingNo;            // 송장번호
+        public String deliveryMessage;       // 배송메시지
         public boolean hasInvoice;           // 송장 입력 여부
         public List<OrderItemDTO> items;     // ★ 개별 상품 목록 (옵션·바코드 포함)
 
-        public InvoiceOrderDTO(Order o) {
+        public InvoiceOrderDTO(Order o, Map<String, Product> productMap, String senderCompanyName,
+                               String senderContact, String senderZip, String senderAddress,
+                               String senderRoutePrimary, String senderRouteSecondary,
+                               String deliveryAreaCode, String arrivalCenterName,
+                               String deliveryPostOfficeName, String deliveryCourseNo,
+                               String arrivalCenterCode, String deliveryPostOfficeCode,
+                               String deliveryTeamCode, String deliveryDistrictCode) {
             this.orderNo       = o.getOrderNo();
             this.channelName   = o.getChannel() != null ? o.getChannel().getChannelName() : "";
             this.recipientName  = o.getRecipientName();
             this.recipientPhone = o.getRecipientPhone();
+            this.postalCode     = o.getPostalCode() != null ? o.getPostalCode() : "";
             this.address       = (o.getAddress() != null ? o.getAddress() : "")
                                + (o.getAddressDetail() != null ? " " + o.getAddressDetail() : "");
+            this.senderCompanyName = senderCompanyName != null ? senderCompanyName : "";
+            this.senderContact = senderContact != null ? senderContact : "";
+            this.senderZip = senderZip != null ? senderZip : "";
+            this.senderAddress = senderAddress != null ? senderAddress : "";
+            this.senderRoutePrimary = senderRoutePrimary != null ? senderRoutePrimary : "";
+            this.senderRouteSecondary = senderRouteSecondary != null ? senderRouteSecondary : "";
+            this.deliveryAreaCode = deliveryAreaCode != null ? deliveryAreaCode : "";
+            this.arrivalCenterName = arrivalCenterName != null ? arrivalCenterName : "";
+            this.deliveryPostOfficeName = deliveryPostOfficeName != null ? deliveryPostOfficeName : "";
+            this.deliveryCourseNo = deliveryCourseNo != null ? deliveryCourseNo : "";
+            this.arrivalCenterCode = arrivalCenterCode != null ? arrivalCenterCode : "";
+            this.deliveryPostOfficeCode = deliveryPostOfficeCode != null ? deliveryPostOfficeCode : "";
+            this.deliveryTeamCode = deliveryTeamCode != null ? deliveryTeamCode : "";
+            this.deliveryDistrictCode = deliveryDistrictCode != null ? deliveryDistrictCode : "";
             this.productName   = o.getItems().isEmpty() ? "" :
-                o.getItems().stream().map(i -> i.getProductName()).collect(Collectors.joining(", "));
-            this.quantity      = o.getItems().stream()
-                .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
+                o.getItems().stream()
+                    .filter(i -> i.getActiveQuantity() > 0)
+                    .map(i -> formatProductLabel(i.getProductName(), i.getOptionName()))
+                    .collect(Collectors.joining(", "));
+            this.quantity      = o.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum();
             this.orderedAt     = o.getOrderedAt() != null ? o.getOrderedAt().toString() : "";
+            this.invoiceIssuedAt = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             this.shippedAt     = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "";
             // 개별 상품 목록 (옵션·바코드 포함)
             this.items         = o.getItems().stream()
-                .map(OrderItemDTO::new)
+                .filter(i -> i.getActiveQuantity() > 0)
+                .map(i -> new OrderItemDTO(i, resolveLocation(productMap, i)))
                 .collect(Collectors.toList());
             // 배송 메모에서 송장 정보 파싱 (저장 형식: "CARRIER:CJ|TRACKING:1234567890")
             parseInvoiceFromMemo(o.getDeliveryMemo());
         }
 
+        private String resolveLocation(Map<String, Product> productMap, OrderItem item) {
+            String productCode = item.getProductCode();
+            if (productCode == null) {
+                return "";
+            }
+            Product product = productMap.get(productCode.toLowerCase());
+            if (product == null || product.getWarehouseLocation() == null) {
+                return "";
+            }
+            return product.getWarehouseLocation().trim();
+        }
+
+        private String formatProductLabel(String productName, String optionName) {
+            if (optionName == null || optionName.isBlank()) {
+                return productName;
+            }
+            return productName + " / " + optionName;
+        }
+
         private void parseInvoiceFromMemo(String memo) {
-            if (memo == null || !memo.startsWith("INVOICE:")) {
+            this.deliveryMessage = extractDeliveryMessage(memo);
+            if (memo == null || !memo.contains(INVOICE_PREFIX)) {
                 this.hasInvoice = false;
                 return;
             }
             try {
-                String[] parts = memo.substring(8).split("\\|");
+                String invoiceSegment = extractInvoiceSegment(memo);
+                if (invoiceSegment == null || invoiceSegment.isBlank()) {
+                    this.hasInvoice = false;
+                    return;
+                }
+                String[] parts = invoiceSegment.split("\\|");
                 for (String part : parts) {
                     String[] kv = part.split(":", 2);
                     if (kv.length == 2) {
@@ -129,6 +237,155 @@ public class InvoiceController {
                 this.hasInvoice = false;
             }
         }
+    }
+
+    private static String extractInvoiceSegment(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return null;
+        }
+        int invoiceIndex = memo.indexOf(INVOICE_PREFIX);
+        if (invoiceIndex < 0) {
+            return null;
+        }
+        return memo.substring(invoiceIndex + INVOICE_PREFIX.length());
+    }
+
+    private static String extractDeliveryMessage(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return "";
+        }
+        int messageIndex = memo.indexOf(MESSAGE_PREFIX);
+        if (messageIndex >= 0) {
+            int endIndex = memo.indexOf('|', messageIndex);
+            String encoded = endIndex >= 0
+                ? memo.substring(messageIndex + MESSAGE_PREFIX.length(), endIndex)
+                : memo.substring(messageIndex + MESSAGE_PREFIX.length());
+            try {
+                return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                log.warn("배송메시지 디코딩 실패: {}", encoded);
+                return "";
+            }
+        }
+        if (memo.contains(INVOICE_PREFIX)) {
+            return "";
+        }
+        return memo;
+    }
+
+    private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName,
+                                             String trackingNo, String poReqNo, String reservationNo, String reqYmd) {
+        String deliveryMessage = extractDeliveryMessage(existingMemo);
+        List<String> parts = new ArrayList<>();
+        if (!deliveryMessage.isBlank()) {
+            parts.add(MESSAGE_PREFIX + Base64.getUrlEncoder().encodeToString(deliveryMessage.getBytes(StandardCharsets.UTF_8)));
+        }
+        StringBuilder invoice = new StringBuilder()
+            .append(INVOICE_PREFIX)
+            .append("CARRIER:").append(Objects.toString(carrierCode, ""))
+            .append("|CARRIER_NAME:").append(Objects.toString(carrierName, ""))
+            .append("|TRACKING:").append(Objects.toString(trackingNo, ""));
+        if (poReqNo != null && !poReqNo.isBlank()) {
+            invoice.append("|PO_REQ_NO:").append(poReqNo);
+        }
+        if (reservationNo != null && !reservationNo.isBlank()) {
+            invoice.append("|RES_NO:").append(reservationNo);
+        }
+        if (reqYmd != null && !reqYmd.isBlank()) {
+            invoice.append("|REQ_YMD:").append(reqYmd);
+        }
+        parts.add(invoice.toString());
+        return String.join("|", parts);
+    }
+
+    private static String removeInvoiceFromMemo(String memo) {
+        String deliveryMessage = extractDeliveryMessage(memo);
+        return deliveryMessage.isBlank() ? null : deliveryMessage;
+    }
+
+    private static InvoiceInfo extractInvoiceInfo(String memo) {
+        String invoiceSegment = extractInvoiceSegment(memo);
+        if (invoiceSegment == null || invoiceSegment.isBlank()) {
+            return null;
+        }
+
+        String carrierCode = null;
+        String carrierName = null;
+        String trackingNo = null;
+        String poReqNo = null;
+        String reservationNo = null;
+        String reqYmd = null;
+        for (String part : invoiceSegment.split("\\|")) {
+            String[] kv = part.split(":", 2);
+            if (kv.length != 2) {
+                continue;
+            }
+            if ("CARRIER".equals(kv[0])) carrierCode = kv[1];
+            if ("CARRIER_NAME".equals(kv[0])) carrierName = kv[1];
+            if ("TRACKING".equals(kv[0])) trackingNo = kv[1];
+            if ("PO_REQ_NO".equals(kv[0])) poReqNo = kv[1];
+            if ("RES_NO".equals(kv[0])) reservationNo = kv[1];
+            if ("REQ_YMD".equals(kv[0])) reqYmd = kv[1];
+        }
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo, poReqNo, reservationNo, reqYmd);
+    }
+
+    private void cancelCarrierInvoiceIfNeeded(Order order) {
+        InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+        if (invoiceInfo == null || invoiceInfo.trackingNo() == null || invoiceInfo.trackingNo().isBlank()) {
+            return;
+        }
+        if (invoiceInfo.carrierCode() == null || invoiceInfo.carrierCode().isBlank()) {
+            return;
+        }
+        String reqYmd = invoiceInfo.reqYmd();
+        if (reqYmd == null || reqYmd.isBlank()) {
+            if (order.getUpdatedAt() != null) {
+                reqYmd = order.getUpdatedAt().toLocalDate()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            }
+        }
+        // poReqNo = 우체국 18자리 소포신청번호 (취소 API의 reqNo 필드에 필요)
+        String poReqNo = invoiceInfo.poReqNo();
+        trackingNumberProvider.cancel(
+            invoiceInfo.carrierCode(),
+            invoiceInfo.carrierName(),
+            poReqNo,
+            invoiceInfo.trackingNo(),
+            invoiceInfo.reservationNo(),
+            reqYmd
+        );
+    }
+
+    /**
+     * 송장번호 또는 주문번호로 단건 조회 (검수 발송 스캔용)
+     * GET /api/invoice/find?q={trackingNoOrOrderNo}
+     */
+    @GetMapping("/find")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> findOrder(@RequestParam String q) {
+        if (q == null || q.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "검색어를 입력하세요"));
+        }
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
+
+        Order order = orderRepository.findWithItemsByOrderNo(q).orElse(null);
+        if (order == null || !statuses.contains(order.getOrderStatus())) {
+            order = orderRepository.findByTrackingNoInMemo(statuses, q).orElse(null);
+        }
+        if (order == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("message", "주문을 찾을 수 없습니다: " + q));
+        }
+        if (order.getDeliveryMemo() == null || !order.getDeliveryMemo().contains(INVOICE_PREFIX)) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(Map.of("message", "송장번호가 없는 주문입니다: " + q));
+        }
+        order.getItems().size();
+        if (order.getChannel() != null) order.getChannel().getChannelName();
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
+        return ResponseEntity.ok(toInvoiceOrderDTO(order, productMap, fullSenderAddress));
     }
 
     /**
@@ -172,8 +429,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -202,11 +461,7 @@ public class InvoiceController {
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
         // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(
-            "INVOICE:CARRIER:" + carrierCode +
-            "|CARRIER_NAME:" + carrierName +
-            "|TRACKING:" + trackingNo
-        );
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
         orderRepository.save(order);
 
         log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -233,11 +488,7 @@ public class InvoiceController {
                 if (orderNo == null || trackingNo == null || trackingNo.isBlank()) { failed++; continue; }
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
-                order.setDeliveryMemo(
-                    "INVOICE:CARRIER:" + carrierCode +
-                    "|CARRIER_NAME:" + carrierName +
-                    "|TRACKING:" + trackingNo
-                );
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -249,6 +500,7 @@ public class InvoiceController {
     /**
      * 송장 입력 완료 목록
      * GET /api/invoice/completed?startDate=2026-01-01&endDate=2026-03-19
+     * 날짜는 송장 입력/발급 시각(updatedAt) 기준
      */
     @GetMapping("/completed")
     @Transactional(readOnly = true)
@@ -258,16 +510,18 @@ public class InvoiceController {
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate
     ) {
+        // CONFIRMED(송장입력 완료) + SHIPPED(검수출고 완료) 모두 포함
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
         List<Order> orders;
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
-            orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
+            orders = orderRepository.findByOrderStatusInAndUpdatedAtRange(statuses, start, end);
         } else {
             orders = new ArrayList<>();
             int p = 0; while(true) {
-                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "updatedAt"));
+                var sl = orderRepository.findByOrderStatusIn(statuses, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
         }
@@ -277,8 +531,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .filter(dto -> dto.hasInvoice)
             .collect(Collectors.toList());
 
@@ -298,25 +554,37 @@ public class InvoiceController {
         String carrierCode = body != null ? body.getOrDefault("carrierCode", "POST") : "POST";
         String carrierName = body != null ? body.getOrDefault("carrierName", "우체국택배") : "우체국택배";
 
-        Order order = orderRepository.findByOrderNo(orderNo)
-            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+        try {
+            Order order = orderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
-        order.setDeliveryMemo(
-            "INVOICE:CARRIER:" + carrierCode +
-            "|CARRIER_NAME:" + carrierName +
-            "|TRACKING:" + trackingNo
-        );
-        orderRepository.save(order);
+            var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
+            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
+                result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
+            orderRepository.save(order);
 
-        log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
-        return ResponseEntity.ok(Map.of(
-            "success", true,
-            "trackingNo", trackingNo,
-            "carrierCode", carrierCode,
-            "carrierName", carrierName,
-            "message", "송장번호 자동 부여 완료: " + trackingNo
-        ));
+            String trackingNo = result.trackingNo();
+            log.info("송장 자동부여: {} → {} {}", orderNo, carrierName, trackingNo);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "trackingNo", trackingNo,
+                "carrierCode", carrierCode,
+                "carrierName", carrierName,
+                "message", "송장번호 자동 부여 완료: " + trackingNo
+            ));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.error("송장 자동부여 실패: {} - {}", orderNo, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("송장 자동부여 중 예기치 않은 오류: {}", orderNo, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "송장 자동 부여 처리 중 서버 오류가 발생했습니다."
+            ));
+        }
     }
 
     /**
@@ -340,23 +608,30 @@ public class InvoiceController {
         orders.forEach(o -> o.getItems().size());
 
         int assigned = 0;
+        List<Map<String, String>> failedOrders = new ArrayList<>();
         for (Order order : orders) {
-            // 이미 송장 있으면 스킵
-            if (order.getDeliveryMemo() != null && order.getDeliveryMemo().startsWith("INVOICE:")) continue;
-            String trackingNo = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
-            order.setDeliveryMemo(
-                "INVOICE:CARRIER:" + carrierCode +
-                "|CARRIER_NAME:" + carrierName +
-                "|TRACKING:" + trackingNo
-            );
-            orderRepository.save(order);
-            assigned++;
+            if (extractInvoiceSegment(order.getDeliveryMemo()) != null) continue;
+            try {
+                var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
+                    result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
+                orderRepository.save(order);
+                assigned++;
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                log.error("송장 일괄 자동부여 실패: {} - {}", order.getOrderNo(), e.getMessage(), e);
+                failedOrders.add(Map.of(
+                    "orderNo", order.getOrderNo(),
+                    "message", e.getMessage()
+                ));
+            }
         }
 
         log.info("송장 일괄 자동부여: {}건 ({})", assigned, carrierName);
         return ResponseEntity.ok(Map.of(
             "success", true,
             "assigned", assigned,
+            "failed", failedOrders.size(),
+            "failedOrders", failedOrders,
             "message", assigned + "건 송장번호 자동 부여 완료"
         ));
     }
@@ -391,8 +666,10 @@ public class InvoiceController {
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
 
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .map(InvoiceOrderDTO::new)
+            .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -416,6 +693,7 @@ public class InvoiceController {
         }
 
         order.getItems().size();
+        cancelCarrierInvoiceIfNeeded(order);
 
         // 발송 시 사용된 창고 코드
         String warehouseCode = AllocationController.getCurrentWarehouseCode();
@@ -494,10 +772,127 @@ public class InvoiceController {
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        order.setDeliveryMemo(null);
-        orderRepository.save(order);
-        log.info("송장삭제: {}", orderNo);
-        return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
+        try {
+            cancelCarrierInvoiceIfNeeded(order);
+            order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
+            orderRepository.save(order);
+            log.info("송장삭제: {}", orderNo);
+            return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.warn("송장삭제 실패 - 우체국 취소가 실패하여 로컬 송장을 유지합니다. orderNo={}, reason={}",
+                orderNo, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "success", false,
+                "message", "우체국 취소 실패: 송장이 유지되었습니다. " + e.getMessage()
+            ));
+        }
+    }
+
+    private Map<String, Product> getInvoiceProductMap() {
+        Map<String, Product> productMap = new HashMap<>();
+        for (Product product : productRepository.findAll()) {
+            if (product.getSku() != null && !product.getSku().isBlank()) {
+                productMap.put(product.getSku().toLowerCase(), product);
+            }
+            if (product.getBarcode() != null && !product.getBarcode().isBlank()) {
+                productMap.put(product.getBarcode().toLowerCase(), product);
+            }
+        }
+        return productMap;
+    }
+
+    private String buildSenderAddress() {
+        String address = Objects.toString(senderAddress, "").trim();
+        String detail = Objects.toString(senderAddressDetail, "").trim();
+        if (address.isBlank()) {
+            return "";
+        }
+        if (detail.isBlank()) {
+            return address;
+        }
+        return address + " " + detail;
+    }
+
+    private String buildSenderRoutePrimary() {
+        List<String> parts = new ArrayList<>();
+        if (officeSer != null && !officeSer.isBlank()) parts.add("공급지 " + officeSer.trim());
+        if (contentCode != null && !contentCode.isBlank()) parts.add("내용 " + contentCode.trim());
+        return String.join("  ", parts);
+    }
+
+    private String buildSenderRouteSecondary() {
+        if (contractApprovalNo == null || contractApprovalNo.isBlank()) {
+            return "";
+        }
+        return "승인 " + contractApprovalNo.trim();
+    }
+
+    @GetMapping("/delivery-area-preview")
+    public ResponseEntity<Map<String, Object>> previewDeliveryArea(
+        @RequestParam String zip,
+        @RequestParam String addr
+    ) {
+        DeliveryAreaCodeService.DeliveryAreaInfo info = deliveryAreaCodeService.lookup(zip, addr);
+        return ResponseEntity.ok(Map.ofEntries(
+            Map.entry("configured", deliveryAreaCodeService.isConfigured()),
+            Map.entry("zip", zip),
+            Map.entry("addr", addr),
+            Map.entry("lastErrorMessage", Objects.toString(deliveryAreaCodeService.getLastErrorMessage(), "")),
+            Map.entry("deliveryAreaCode", info.deliveryAreaCode()),
+            Map.entry("arrivalCenterName", info.arrivalCenterName()),
+            Map.entry("deliveryPostOfficeName", info.deliveryPostOfficeName()),
+            Map.entry("deliveryCourseNo", info.courseNo()),
+            Map.entry("arrivalCenterCode", info.arrivalCenterCode()),
+            Map.entry("deliveryPostOfficeCode", info.deliveryPostOfficeCode()),
+            Map.entry("deliveryTeamCode", info.deliveryTeamCode()),
+            Map.entry("deliveryDistrictCode", info.deliveryDistrictCode()),
+            Map.entry("primaryLine", info.toPrimaryLine()),
+            Map.entry("secondaryLine", info.toSecondaryLine())
+        ));
+    }
+
+    private InvoiceOrderDTO toInvoiceOrderDTO(Order order, Map<String, Product> productMap, String fullSenderAddress) {
+        DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo =
+            deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
+
+        boolean deliveryAreaConfigured = deliveryAreaCodeService.isConfigured();
+        String senderRoutePrimary = deliveryAreaConfigured
+            ? deliveryAreaInfo.toPrimaryLine()
+            : buildSenderRoutePrimary();
+        String senderRouteSecondary = deliveryAreaConfigured
+            ? deliveryAreaInfo.toSecondaryLine()
+            : buildSenderRouteSecondary();
+
+        return new InvoiceOrderDTO(
+            order,
+            productMap,
+            senderCompanyName,
+            senderContact,
+            senderZip,
+            fullSenderAddress,
+            senderRoutePrimary,
+            senderRouteSecondary,
+            deliveryAreaInfo.deliveryAreaCode(),
+            deliveryAreaInfo.arrivalCenterName(),
+            deliveryAreaInfo.deliveryPostOfficeName(),
+            deliveryAreaInfo.courseNo(),
+            deliveryAreaInfo.arrivalCenterCode(),
+            deliveryAreaInfo.deliveryPostOfficeCode(),
+            deliveryAreaInfo.deliveryTeamCode(),
+            deliveryAreaInfo.deliveryDistrictCode()
+        );
+    }
+
+    private String buildRecipientAddress(Order order) {
+        String address = Objects.toString(order.getAddress(), "").trim();
+        String detail = Objects.toString(order.getAddressDetail(), "").trim();
+        if (address.isBlank()) {
+            return "";
+        }
+        if (detail.isBlank()) {
+            return address;
+        }
+        return address + " " + detail;
     }
 
 }
