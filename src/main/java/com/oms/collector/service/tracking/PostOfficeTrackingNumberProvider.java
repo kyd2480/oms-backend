@@ -133,6 +133,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         if (StringUtils.hasText(reqYmd)) {
             fields.put("reqYmd", reqYmd);
         }
+        fields.put("delYn", "Y");
         fields.put("regiNo", trackingNo);
 
         String xml = invokeApi(CANCEL_ORDER_API_PATH, encrypt(buildQueryString(fields)));
