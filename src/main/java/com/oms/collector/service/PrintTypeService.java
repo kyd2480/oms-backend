@@ -6,6 +6,7 @@ import com.oms.collector.repository.PrintTypeRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@DependsOn("operationalSchemaMigration")
 @RequiredArgsConstructor
 public class PrintTypeService {
     private final PrintTypeRepository printTypeRepository;
