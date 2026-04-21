@@ -325,9 +325,14 @@ public class CsOrderController {
         }
         Order split = cloneOrderHeader(source, nextSplitOrderNo(source.getOrderNo()));
         split.setSplitFromOrderNo(source.getOrderNo());
+        // split을 먼저 저장해 orderId(PK)를 확보한 뒤 아이템 이동
+        orderRepository.saveAndFlush(split);
+
+        // orphanRemoval 오동작 방지: removeItem(order=null) 대신 직접 참조 변경
         for (OrderItem item : selected) {
-            source.removeItem(item);
-            split.addItem(item);
+            source.getItems().remove(item);
+            item.setOrder(split);
+            split.getItems().add(item);
         }
         recalcAmount(source);
         recalcAmount(split);
