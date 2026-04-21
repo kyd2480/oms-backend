@@ -15,11 +15,12 @@ public interface TrackingNumberProvider {
 
     /**
      * 송장번호 발급 결과
-     * trackingNo  : 등기번호 (regiNo)
-     * reservationNo : 우체국 예약번호 (resNo, 취소 시 필요)
-     * reqYmd      : 신청일자 yyyyMMdd (취소 시 필요)
+     * trackingNo    : 등기번호 (regiNo, 13자리)
+     * poReqNo       : 우체국 소포신청번호 (reqNo, 18자리, 건당 부여) — 취소 필수
+     * reservationNo : 우체국 예약번호 (resNo, 16자리, 일자당 부여) — 취소 필수
+     * reqYmd        : 신청일자 yyyyMMdd
      */
-    record IssueResult(String trackingNo, String reservationNo, String reqYmd) {}
+    record IssueResult(String trackingNo, String poReqNo, String reservationNo, String reqYmd) {}
 
     /**
      * 송장번호 단건 발급
@@ -41,7 +42,7 @@ public interface TrackingNumberProvider {
      * @param reservationNo  예약번호 (resNo)
      * @param reqYmd         신청일자 yyyyMMdd
      */
-    default void cancel(String carrierCode, String carrierName, String orderNo,
+    default void cancel(String carrierCode, String carrierName, String poReqNo,
                         String trackingNo, String reservationNo, String reqYmd) {
         if (!supports(carrierCode)) {
             throw new UnsupportedOperationException("해당 택배사 송장취소를 지원하지 않습니다: " + carrierCode);

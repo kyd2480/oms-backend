@@ -111,7 +111,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
     }
 
     @Override
-    public void cancel(String carrierCode, String carrierName, String orderNo,
+    public void cancel(String carrierCode, String carrierName, String poReqNo,
                        String trackingNo, String reservationNo, String reqYmd) {
         if (!"POST".equals(carrierCode)) {
             throw new UnsupportedOperationException(
@@ -120,13 +120,14 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         }
         validateConfiguration();
         requireText(trackingNo, "trackingNo");
+        requireText(poReqNo, "poReqNo (우체국 18자리 소포신청번호) — 신규 발급된 송장만 취소 가능합니다");
 
         String resolvedApprNo = StringUtils.hasText(contractApprovalNo) ? contractApprovalNo : fetchApprovalNumber();
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("custNo", customerNo);
         fields.put("apprNo", resolvedApprNo);
         fields.put("reqType", "1");
-        fields.put("reqNo", orderNo);
+        fields.put("reqNo", poReqNo);
         if (StringUtils.hasText(reservationNo)) {
             fields.put("resNo", reservationNo);
         }
@@ -138,7 +139,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
 
         String xml = invokeApi(CANCEL_ORDER_API_PATH, encrypt(buildQueryString(fields)));
         ensureNoApiError(xml);
-        log.info("[우체국 API] 송장번호 취소 완료: orderNo={}, trackingNo={}", orderNo, trackingNo);
+        log.info("[우체국 API] 송장번호 취소 완료: poReqNo={}, trackingNo={}", poReqNo, trackingNo);
     }
 
     private IssueResult issueFromApi(String orderNo) {
@@ -154,10 +155,11 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         ensureNoApiError(xml);
 
         String trackingNo = getRequiredTagValue(xml, "regiNo");
+        String poReqNo = getOptionalTagValue(xml, "reqNo");
         String reservationNo = getOptionalTagValue(xml, "resNo");
         String reqYmd = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, resNo={}, reqYmd={}", orderNo, trackingNo, reservationNo, reqYmd);
-        return new IssueResult(trackingNo, reservationNo, reqYmd);
+        log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, reqNo={}, resNo={}, reqYmd={}", orderNo, trackingNo, poReqNo, reservationNo, reqYmd);
+        return new IssueResult(trackingNo, poReqNo, reservationNo, reqYmd);
     }
 
     private void validateConfiguration() {
@@ -209,7 +211,7 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         putIfHasText(fields, "goodsCd", truncate(buildGoodsCode(order), 400));
         putIfHasText(fields, "goodsSize", truncateBytes(buildOptionSummary(order), 30));
         fields.put("qty", Integer.toString(order.getItems().stream()
-            .mapToInt(item -> item.getQuantity() == null ? 0 : item.getQuantity())
+            .mapToInt(com.oms.collector.entity.OrderItem::getActiveQuantity)
             .sum()));
         putIfHasText(fields, "delivMsg", truncate(extractDeliveryMessage(order.getDeliveryMemo()), 200));
         fields.put("printYn", normalizeYn(printYn, "N"));

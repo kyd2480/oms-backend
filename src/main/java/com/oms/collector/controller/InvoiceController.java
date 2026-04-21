@@ -76,7 +76,7 @@ public class InvoiceController {
     @Value("${tracking.post-office.contract-approval-no:}")
     private String contractApprovalNo;
 
-    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo, String reservationNo, String reqYmd) {}
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo, String poReqNo, String reservationNo, String reqYmd) {}
 
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
@@ -274,7 +274,7 @@ public class InvoiceController {
     }
 
     private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName,
-                                             String trackingNo, String reservationNo, String reqYmd) {
+                                             String trackingNo, String poReqNo, String reservationNo, String reqYmd) {
         String deliveryMessage = extractDeliveryMessage(existingMemo);
         List<String> parts = new ArrayList<>();
         if (!deliveryMessage.isBlank()) {
@@ -285,6 +285,9 @@ public class InvoiceController {
             .append("CARRIER:").append(Objects.toString(carrierCode, ""))
             .append("|CARRIER_NAME:").append(Objects.toString(carrierName, ""))
             .append("|TRACKING:").append(Objects.toString(trackingNo, ""));
+        if (poReqNo != null && !poReqNo.isBlank()) {
+            invoice.append("|PO_REQ_NO:").append(poReqNo);
+        }
         if (reservationNo != null && !reservationNo.isBlank()) {
             invoice.append("|RES_NO:").append(reservationNo);
         }
@@ -309,6 +312,7 @@ public class InvoiceController {
         String carrierCode = null;
         String carrierName = null;
         String trackingNo = null;
+        String poReqNo = null;
         String reservationNo = null;
         String reqYmd = null;
         for (String part : invoiceSegment.split("\\|")) {
@@ -319,10 +323,11 @@ public class InvoiceController {
             if ("CARRIER".equals(kv[0])) carrierCode = kv[1];
             if ("CARRIER_NAME".equals(kv[0])) carrierName = kv[1];
             if ("TRACKING".equals(kv[0])) trackingNo = kv[1];
+            if ("PO_REQ_NO".equals(kv[0])) poReqNo = kv[1];
             if ("RES_NO".equals(kv[0])) reservationNo = kv[1];
             if ("REQ_YMD".equals(kv[0])) reqYmd = kv[1];
         }
-        return new InvoiceInfo(carrierCode, carrierName, trackingNo, reservationNo, reqYmd);
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo, poReqNo, reservationNo, reqYmd);
     }
 
     private void cancelCarrierInvoiceIfNeeded(Order order) {
@@ -335,16 +340,17 @@ public class InvoiceController {
         }
         String reqYmd = invoiceInfo.reqYmd();
         if (reqYmd == null || reqYmd.isBlank()) {
-            // 저장된 신청일자 없으면 updatedAt으로 폴백
             if (order.getUpdatedAt() != null) {
                 reqYmd = order.getUpdatedAt().toLocalDate()
                     .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
             }
         }
+        // poReqNo = 우체국 18자리 소포신청번호 (취소 API의 reqNo 필드에 필요)
+        String poReqNo = invoiceInfo.poReqNo();
         trackingNumberProvider.cancel(
             invoiceInfo.carrierCode(),
             invoiceInfo.carrierName(),
-            order.getOrderNo(),
+            poReqNo,
             invoiceInfo.trackingNo(),
             invoiceInfo.reservationNo(),
             reqYmd
@@ -424,7 +430,7 @@ public class InvoiceController {
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
         // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null));
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
         orderRepository.save(order);
 
         log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -451,7 +457,7 @@ public class InvoiceController {
                 if (orderNo == null || trackingNo == null || trackingNo.isBlank()) { failed++; continue; }
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
-                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null));
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -523,7 +529,7 @@ public class InvoiceController {
 
             var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
-                result.trackingNo(), result.reservationNo(), result.reqYmd()));
+                result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
             orderRepository.save(order);
 
             String trackingNo = result.trackingNo();
@@ -577,7 +583,7 @@ public class InvoiceController {
             try {
                 var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
-                    result.trackingNo(), result.reservationNo(), result.reqYmd()));
+                    result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
                 orderRepository.save(order);
                 assigned++;
             } catch (IllegalArgumentException | IllegalStateException e) {

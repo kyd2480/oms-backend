@@ -40,12 +40,12 @@ public class MockTrackingNumberProvider implements TrackingNumberProvider {
         long seq = SEQ.incrementAndGet() % 1_000_000_000_000L;
         String trackingNo = prefix + String.format("%012d", seq);
         log.info("[Mock] 송장번호 발급: {} → {} ({})", orderNo, trackingNo, carrierName);
-        return new IssueResult(trackingNo, null, null);
+        return new IssueResult(trackingNo, null, null, null);
     }
 
     @Override
-    public void cancel(String carrierCode, String carrierName, String orderNo,
+    public void cancel(String carrierCode, String carrierName, String poReqNo,
                        String trackingNo, String reservationNo, String reqYmd) {
-        log.info("[Mock] 송장번호 취소: {} → {} ({})", orderNo, trackingNo, carrierName);
+        log.info("[Mock] 송장번호 취소: poReqNo={} trackingNo={} ({})", poReqNo, trackingNo, carrierName);
     }
 }
