@@ -20,6 +20,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findWithItemsByOrderNo(String orderNo);
 
     @EntityGraph(attributePaths = {"items", "channel"})
+    @Query("SELECT o FROM Order o WHERE o.orderStatus IN :statuses " +
+           "AND o.deliveryMemo LIKE CONCAT('%TRACKING:', :trackingNo, '%')")
+    Optional<Order> findByTrackingNoInMemo(
+        @Param("statuses") java.util.Collection<Order.OrderStatus> statuses,
+        @Param("trackingNo") String trackingNo);
+
+    @EntityGraph(attributePaths = {"items", "channel"})
     Optional<Order> findFirstByChannelChannelCodeAndChannelOrderNo(String channelCode, String channelOrderNo);
 
     Optional<Order> findFirstByOrderByOrderedAtDesc();

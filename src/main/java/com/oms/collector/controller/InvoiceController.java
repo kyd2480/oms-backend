@@ -358,6 +358,37 @@ public class InvoiceController {
     }
 
     /**
+     * 송장번호 또는 주문번호로 단건 조회 (검수 발송 스캔용)
+     * GET /api/invoice/find?q={trackingNoOrOrderNo}
+     */
+    @GetMapping("/find")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> findOrder(@RequestParam String q) {
+        if (q == null || q.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "검색어를 입력하세요"));
+        }
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
+
+        Order order = orderRepository.findWithItemsByOrderNo(q).orElse(null);
+        if (order == null || !statuses.contains(order.getOrderStatus())) {
+            order = orderRepository.findByTrackingNoInMemo(statuses, q).orElse(null);
+        }
+        if (order == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("message", "주문을 찾을 수 없습니다: " + q));
+        }
+        if (order.getDeliveryMemo() == null || !order.getDeliveryMemo().contains(INVOICE_PREFIX)) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(Map.of("message", "송장번호가 없는 주문입니다: " + q));
+        }
+        order.getItems().size();
+        if (order.getChannel() != null) order.getChannel().getChannelName();
+        Map<String, Product> productMap = getInvoiceProductMap();
+        String fullSenderAddress = buildSenderAddress();
+        return ResponseEntity.ok(toInvoiceOrderDTO(order, productMap, fullSenderAddress));
+    }
+
+    /**
      * 택배사 목록
      * GET /api/invoice/carriers
      */
