@@ -44,7 +44,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
     @Query("SELECT SUM(oi.quantity) FROM OrderItem oi WHERE oi.order = :order")
     Long getTotalQuantityByOrder(@Param("order") Order order);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE OrderItem i SET i.order = :newOrder WHERE i.itemId IN :itemIds")
     void moveItemsToOrder(@Param("newOrder") Order newOrder, @Param("itemIds") Set<UUID> itemIds);
 }

@@ -469,34 +469,37 @@ public class CsOrderController {
     }
 
     private Order cloneOrderHeader(Order source, String orderNo) {
+        String customerName = source.getCustomerName() != null
+            ? source.getCustomerName() : source.getRecipientName();
+        String recipientPhone = source.getRecipientPhone() != null
+            ? source.getRecipientPhone() : "";
         return Order.builder()
             .orderNo(orderNo)
-            .rawOrder(source.getRawOrder())
             .channel(source.getChannel())
             .channelOrderNo(source.getChannelOrderNo())
-            .customerName(source.getCustomerName())
+            .customerName(customerName)
             .customerPhone(source.getCustomerPhone())
             .customerEmail(source.getCustomerEmail())
             .recipientName(source.getRecipientName())
-            .recipientPhone(source.getRecipientPhone())
+            .recipientPhone(recipientPhone)
             .postalCode(source.getPostalCode())
             .address(source.getAddress())
             .addressDetail(source.getAddressDetail())
-            .deliveryMemo(source.getDeliveryMemo())
+            .deliveryMemo(null)
             .totalAmount(BigDecimal.ZERO)
             .paymentAmount(BigDecimal.ZERO)
-            .shippingFee(source.getShippingFee())
+            .shippingFee(source.getShippingFee() != null ? source.getShippingFee() : BigDecimal.ZERO)
             .discountAmount(BigDecimal.ZERO)
             .orderStatus(source.getOrderStatus())
             .paymentStatus(source.getPaymentStatus())
             .orderedAt(source.getOrderedAt())
             .paidAt(source.getPaidAt())
-            .shippingHold(source.getShippingHold())
+            .shippingHold(Boolean.TRUE.equals(source.getShippingHold()))
             .holdReason(source.getHoldReason())
-            .priorityAllocation(source.getPriorityAllocation())
-            .allocationExcluded(source.getAllocationExcluded())
-            .printTypeCode(source.getPrintTypeCode())
-            .printTypeName(source.getPrintTypeName())
+            .priorityAllocation(Boolean.TRUE.equals(source.getPriorityAllocation()))
+            .allocationExcluded(Boolean.TRUE.equals(source.getAllocationExcluded()))
+            .printTypeCode(source.getPrintTypeCode() != null ? source.getPrintTypeCode() : "NORMAL")
+            .printTypeName(source.getPrintTypeName() != null ? source.getPrintTypeName() : "일반건")
             .build();
     }
 
