@@ -326,24 +326,32 @@ public class CsOrderController {
         if (selectedCount == 0 || selectedCount >= source.getItems().size()) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "일부 상품만 선택해야 주문을 나눌 수 있습니다."));
         }
-        // 1. split 주문 먼저 저장 (orderId 확보)
-        Order split = cloneOrderHeader(source, nextSplitOrderNo(source.getOrderNo()));
-        split.setSplitFromOrderNo(source.getOrderNo());
-        orderRepository.saveAndFlush(split);
+        try {
+            // 1. split 주문 먼저 저장 (orderId 확보)
+            Order split = cloneOrderHeader(source, nextSplitOrderNo(source.getOrderNo()));
+            split.setSplitFromOrderNo(source.getOrderNo());
+            orderRepository.saveAndFlush(split);
 
-        // 2. JPQL UPDATE로 order_id FK 직접 변경 — orphanRemoval 충돌 없음
-        orderItemRepository.moveItemsToOrder(split, selectedIds);
+            // 2. JPQL UPDATE로 order_id FK 직접 변경 — orphanRemoval 충돌 없음
+            orderItemRepository.moveItemsToOrder(split, selectedIds);
 
-        // 3. 양쪽 주문 재조회 후 금액 재계산
-        Order freshSource = getOrder(orderNo);
-        Order freshSplit  = getOrder(split.getOrderNo());
-        recalcAmount(freshSource);
-        recalcAmount(freshSplit);
-        orderRepository.save(freshSource);
-        orderRepository.save(freshSplit);
+            // 3. 양쪽 주문 재조회 후 금액 재계산
+            Order freshSource = getOrder(orderNo);
+            Order freshSplit  = getOrder(split.getOrderNo());
+            recalcAmount(freshSource);
+            recalcAmount(freshSplit);
+            orderRepository.save(freshSource);
+            orderRepository.save(freshSplit);
 
-        return ResponseEntity.ok(Map.of("success", true, "message", "주문 나누기 완료",
-            "order", toDTO(freshSource), "newOrder", toDTO(freshSplit)));
+            return ResponseEntity.ok(Map.of("success", true, "message", "주문 나누기 완료",
+                "order", toDTO(freshSource), "newOrder", toDTO(freshSplit)));
+        } catch (Exception e) {
+            log.error("나누기 실패: orderNo={}, error={}", orderNo, e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of(
+                "success", false,
+                "message", e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()
+            ));
+        }
     }
 
     private List<Order> filterByKeyword(List<Order> orders, String searchType, String kw) {
