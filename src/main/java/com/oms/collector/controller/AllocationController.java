@@ -129,6 +129,22 @@ public class AllocationController {
         }
 
         if (Boolean.TRUE.equals(order.getShippingHold())) {
+            boolean forceHold = body != null && "true".equalsIgnoreCase(String.valueOf(body.get("forceHold")));
+            boolean releaseHold = body != null && "true".equalsIgnoreCase(String.valueOf(body.get("releaseHold")));
+            if (!forceHold && !releaseHold) {
+                return ResponseEntity.status(409).body(Map.of(
+                    "success", false,
+                    "hold", true,
+                    "message", "출고보류 주문입니다. 보류해지 후 출고할지 확인해주세요: " + (order.getHoldReason() != null ? order.getHoldReason() : "클레임 확인 필요")
+                ));
+            }
+            if (releaseHold) {
+                order.setShippingHold(false);
+                order.setHoldReason(null);
+            }
+        }
+
+        if (Boolean.TRUE.equals(order.getShippingHold())) {
             return ResponseEntity.badRequest().body(Map.of(
                 "success", false,
                 "message", "출고보류 주문입니다: " + (order.getHoldReason() != null ? order.getHoldReason() : "클레임 확인 필요")

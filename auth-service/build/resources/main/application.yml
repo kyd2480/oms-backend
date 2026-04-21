@@ -3,51 +3,34 @@
 # ============================================
 
 server:
-  port: 8090
+  port: ${PORT:8080}
 
 spring:
   application:
     name: auth-service
-  
-  # 데이터베이스 설정
+
   datasource:
-    url: jdbc:postgresql://localhost:5436/auth_db
-    username: postgres
-    password: postgres
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://shuttle.proxy.rlwy.net:57289/railway?user=postgres&password=NMAOYHEaYJBwGNIZXJYVqZEurqKEHqYY}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:NMAOYHEaYJBwGNIZXJYVqZEurqKEHqYY}
     driver-class-name: org.postgresql.Driver
-  
-  # JPA 설정
+
   jpa:
     hibernate:
-      ddl-auto: update  # 개발: update, 프로덕션: validate
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
-  
-  # Eureka 클라이언트 설정 (선택사항)
-  # cloud:
-  #   discovery:
-  #     enabled: true
 
-# JWT 설정
 jwt:
-  secret: oms-secret-key-for-jwt-token-generation-minimum-256-bits-required
-  expiration: 86400000  # 24시간 (밀리초)
+  secret: ${JWT_SECRET:oms-secret-key-for-jwt-token-generation-minimum-256-bits-required}
+  expiration: ${JWT_EXPIRATION:86400000}
 
-# 로깅 설정
 logging:
   level:
     com.logistics.scm.auth: DEBUG
     org.springframework.security: DEBUG
     org.hibernate.SQL: DEBUG
-
-# Eureka 설정 (선택사항)
-# eureka:
-#   client:
-#     service-url:
-#       defaultZone: http://localhost:8761/eureka/
-#   instance:
-#     prefer-ip-address: true

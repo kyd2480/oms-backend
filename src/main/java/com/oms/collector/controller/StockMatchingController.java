@@ -268,6 +268,7 @@ public class StockMatchingController {
         for (String orderNo : orderNos) {
             Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
             if (order == null) { failed++; failedNos.add(orderNo); continue; }
+            if (Boolean.TRUE.equals(order.getAllocationExcluded())) { failed++; failedNos.add(orderNo); continue; }
             order.getItems().size();
             boolean ok = true;
 

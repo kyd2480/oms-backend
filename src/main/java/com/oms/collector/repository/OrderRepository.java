@@ -20,6 +20,12 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findWithItemsByOrderNo(String orderNo);
 
     @EntityGraph(attributePaths = {"items", "channel"})
+    @Query("SELECT DISTINCT o FROM Order o WHERE LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(o.deliveryMemo) LIKE LOWER(CONCAT('%TRACKING:', :keyword, '%')) " +
+           "ORDER BY o.orderedAt DESC")
+    List<Order> searchByOrderNoOrTracking(@Param("keyword") String keyword);
+
+    @EntityGraph(attributePaths = {"items", "channel"})
     @Query("SELECT o FROM Order o WHERE o.orderStatus IN :statuses " +
            "AND o.deliveryMemo LIKE CONCAT('%TRACKING:', :trackingNo, '%')")
     Optional<Order> findByTrackingNoInMemo(
@@ -131,6 +137,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         LEFT JOIN products p ON LOWER(p.sku)     = LOWER(oi.product_code)
                              OR LOWER(p.barcode) = LOWER(oi.product_code)
         WHERE o.order_status = 'PENDING'
+          AND COALESCE(o.allocation_excluded, false) = false
           AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND p.product_id IS NULL
         """, nativeQuery = true)
@@ -161,11 +168,12 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                             OR LOWER(p.barcode) = LOWER(oi.product_code)
         LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
         WHERE o.order_status = 'PENDING'
+          AND COALESCE(o.allocation_excluded, false) = false
           AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND oi.product_code IS NOT NULL
           AND oi.product_code <> ''
           AND oi.product_code !~* '^(11ST|NAVER|CP|GS|COUPANG|KAKAO)-'
-        ORDER BY o.ordered_at DESC
+        ORDER BY COALESCE(o.priority_allocation, false) DESC, o.ordered_at ASC
         """, nativeQuery = true)
     List<MatchedItemProjection> findPendingMatchedByCode();
 
@@ -195,9 +203,10 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
                              OR LOWER(p.barcode) = LOWER(oi.product_code)
         LEFT JOIN sales_channels sc ON sc.channel_id = o.channel_id
         WHERE o.order_status = 'PENDING'
+          AND COALESCE(o.allocation_excluded, false) = false
           AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
           AND p.product_id IS NULL
-        ORDER BY o.ordered_at DESC
+        ORDER BY COALESCE(o.priority_allocation, false) DESC, o.ordered_at ASC
         """, nativeQuery = true)
     List<MatchedItemProjection> findPendingUnmatchedByCode();
 

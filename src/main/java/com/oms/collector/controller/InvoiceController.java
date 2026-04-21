@@ -134,6 +134,10 @@ public class InvoiceController {
         public String deliveryPostOfficeCode;
         public String deliveryTeamCode;
         public String deliveryDistrictCode;
+        public Boolean shippingHold;
+        public String holdReason;
+        public String printTypeCode;
+        public String printTypeName;
         public String productName;           // 상품명 합본 (하위호환 유지)
         public int    quantity;              // 총 수량 합계 (하위호환 유지)
         public String orderedAt;
@@ -174,6 +178,10 @@ public class InvoiceController {
             this.deliveryPostOfficeCode = deliveryPostOfficeCode != null ? deliveryPostOfficeCode : "";
             this.deliveryTeamCode = deliveryTeamCode != null ? deliveryTeamCode : "";
             this.deliveryDistrictCode = deliveryDistrictCode != null ? deliveryDistrictCode : "";
+            this.shippingHold = Boolean.TRUE.equals(o.getShippingHold());
+            this.holdReason = o.getHoldReason();
+            this.printTypeCode = o.getPrintTypeCode() != null ? o.getPrintTypeCode() : "NORMAL";
+            this.printTypeName = o.getPrintTypeName() != null ? o.getPrintTypeName() : "일반건";
             this.productName   = o.getItems().isEmpty() ? "" :
                 o.getItems().stream()
                     .filter(i -> i.getActiveQuantity() > 0)
@@ -408,7 +416,8 @@ public class InvoiceController {
         @RequestParam(defaultValue = "0")   int page,
         @RequestParam(defaultValue = "200") int size,
         @RequestParam(required = false) String startDate,
-        @RequestParam(required = false) String endDate
+        @RequestParam(required = false) String endDate,
+        @RequestParam(required = false) String printTypeCode
     ) {
         List<Order> orders;
         if (startDate != null && endDate != null) {
@@ -432,6 +441,8 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
+            .filter(order -> printTypeCode == null || printTypeCode.isBlank()
+                || Objects.equals(printTypeCode, order.getPrintTypeCode() != null ? order.getPrintTypeCode() : "NORMAL"))
             .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
@@ -459,6 +470,13 @@ public class InvoiceController {
 
         Order order = orderRepository.findByOrderNo(orderNo)
             .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
+        if (Boolean.TRUE.equals(order.getShippingHold())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "보류 주문은 송장번호를 저장할 수 없습니다: " + Objects.toString(order.getHoldReason(), "")
+            ));
+        }
 
         // deliveryMemo에 송장 정보 저장
         order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
@@ -488,6 +506,7 @@ public class InvoiceController {
                 if (orderNo == null || trackingNo == null || trackingNo.isBlank()) { failed++; continue; }
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
+                if (Boolean.TRUE.equals(order.getShippingHold())) { failed++; continue; }
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
                 orderRepository.save(order);
                 saved++;
@@ -558,6 +577,13 @@ public class InvoiceController {
             Order order = orderRepository.findByOrderNo(orderNo)
                 .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
+            if (Boolean.TRUE.equals(order.getShippingHold())) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                    "success", false,
+                    "message", "보류 주문은 송장번호를 부여할 수 없습니다: " + Objects.toString(order.getHoldReason(), "")
+                ));
+            }
+
             var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
                 result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
@@ -611,6 +637,13 @@ public class InvoiceController {
         List<Map<String, String>> failedOrders = new ArrayList<>();
         for (Order order : orders) {
             if (extractInvoiceSegment(order.getDeliveryMemo()) != null) continue;
+            if (Boolean.TRUE.equals(order.getShippingHold())) {
+                failedOrders.add(Map.of(
+                    "orderNo", order.getOrderNo(),
+                    "message", "보류 주문"
+                ));
+                continue;
+            }
             try {
                 var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,

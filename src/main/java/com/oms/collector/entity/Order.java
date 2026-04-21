@@ -118,6 +118,28 @@ public class Order {
 
     @Column(name = "hold_reason", columnDefinition = "TEXT")
     private String holdReason;
+
+    @Column(name = "priority_allocation", nullable = false)
+    @Builder.Default
+    private Boolean priorityAllocation = false;
+
+    @Column(name = "allocation_excluded", nullable = false)
+    @Builder.Default
+    private Boolean allocationExcluded = false;
+
+    @Column(name = "print_type_code", length = 50)
+    @Builder.Default
+    private String printTypeCode = "NORMAL";
+
+    @Column(name = "print_type_name", length = 100)
+    @Builder.Default
+    private String printTypeName = "일반건";
+
+    @Column(name = "merged_into_order_no", length = 100)
+    private String mergedIntoOrderNo;
+
+    @Column(name = "split_from_order_no", length = 100)
+    private String splitFromOrderNo;
     
     // 날짜
     @Column(name = "ordered_at", nullable = false)
