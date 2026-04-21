@@ -103,6 +103,27 @@ public class InventoryController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    @PatchMapping("/products/{id}/stock")
+    public ResponseEntity<?> updateProductStock(@PathVariable UUID id,
+                                                @RequestBody InventoryDto.StockUpdateRequest request) {
+        log.info("✏️ 재고현황 수량 수정: product={}, warehouse={}", id, request.getWarehouseCode());
+        try {
+            Product product = inventoryService.updateInventorySnapshot(
+                id,
+                request.getWarehouseCode(),
+                request.getWarehouseName(),
+                request.getWarehouseStock(),
+                request.getReservedStock(),
+                request.getWarehouseLocation(),
+                request.getNote(),
+                request.getReason()
+            );
+            return ResponseEntity.ok(toProductDto(product));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
     @DeleteMapping("/products/{id}")
     public ResponseEntity<Void> deleteProduct(@PathVariable UUID id) {
         log.info("🗑️ 상품 삭제: {}", id);
@@ -219,7 +240,9 @@ public class InventoryController {
             @RequestParam(required = false) String endDate) {
         LocalDateTime start = startDate != null ? LocalDateTime.parse(startDate) : LocalDateTime.now().minusMonths(1);
         LocalDateTime end   = endDate   != null ? LocalDateTime.parse(endDate)   : LocalDateTime.now();
-        List<InventoryTransaction> transactions = inventoryService.getTransactionHistory(id, start, end);
+        List<InventoryTransaction> transactions = (startDate == null && endDate == null)
+            ? inventoryService.getAllTransactionHistory(id)
+            : inventoryService.getTransactionHistory(id, start, end);
         return ResponseEntity.ok(transactions.stream().map(this::toTransactionDto).collect(Collectors.toList()));
     }
 
@@ -309,6 +332,7 @@ public class InventoryController {
             .afterStock(transaction.getAfterStock())
             .fromLocation(transaction.getFromLocation())
             .toLocation(transaction.getToLocation())
+            .referenceType(transaction.getReferenceType())
             .notes(transaction.getNotes())
             .createdBy(transaction.getCreatedBy())
             .createdAt(transaction.getCreatedAt())

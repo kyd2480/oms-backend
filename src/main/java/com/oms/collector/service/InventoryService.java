@@ -160,21 +160,31 @@ public class InventoryService {
         // 도착 창고 재고 증가 (레거시 컬럼 vs warehouse_stock 테이블 구분)
         applyWarehouseStockDelta(product, toWh.getCode(), toWh.getName(), quantity);
 
-        // 거래 내역 기록 (총재고 변경 전에 생성해야 beforeStock이 정확함)
-        String detailedNotes = String.format("창고이동:%s→%s | %s",
-            fromWh.getName(), toWh.getName(), notes != null ? notes : "");
         int beforeTotal = product.getTotalStock();
-        InventoryTransaction tx = InventoryTransaction.builder()
+        String baseNotes = notes != null ? notes : "";
+        InventoryTransaction outTx = InventoryTransaction.builder()
             .product(product)
-            .transactionType(normalTransfer ? "IN" : "MOVE")
+            .transactionType("OUT")
+            .quantity(quantity)
+            .beforeStock(beforeTotal)
+            .afterStock(beforeTotal)
+            .fromLocation(fromWh.getName())
+            .referenceType("WAREHOUSE_TRANSFER")
+            .notes(String.format("창고이동 출고:%s→%s | %s", fromWh.getName(), toWh.getName(), baseNotes))
+            .build();
+        transactionRepository.save(outTx);
+
+        InventoryTransaction inTx = InventoryTransaction.builder()
+            .product(product)
+            .transactionType("IN")
             .quantity(quantity)
             .beforeStock(beforeTotal)
             .afterStock(normalTransfer ? beforeTotal + quantity : beforeTotal)
-            .fromLocation(fromWh.getName())
             .toLocation(toWh.getName())
-            .notes(detailedNotes)
+            .referenceType("WAREHOUSE_TRANSFER")
+            .notes(String.format("창고이동 입고:%s→%s | %s", fromWh.getName(), toWh.getName(), baseNotes))
             .build();
-        transactionRepository.save(tx);
+        transactionRepository.save(inTx);
 
         // 정상 검수 이동: 총재고/가용재고 증가 (ANYANG_KO_RETURN은 총재고 미반영이었으므로 여기서 반영)
         if (normalTransfer) {
@@ -185,6 +195,84 @@ public class InventoryService {
 
         log.info("✅ 창고 이동 완료: {} {}개 {} → {}", product.getProductName(), quantity,
             fromWh.getName(), toWh.getName());
+    }
+
+    @Transactional
+    public Product updateInventorySnapshot(UUID productId,
+                                           String warehouseCode,
+                                           String warehouseName,
+                                           Integer targetWarehouseStock,
+                                           Integer reservedStock,
+                                           String warehouseLocation,
+                                           String note,
+                                           String reason) {
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다: " + productId));
+
+        int beforeTotal = product.getTotalStock() != null ? product.getTotalStock() : 0;
+        int delta = 0;
+        if (warehouseCode != null && !warehouseCode.isBlank() && targetWarehouseStock != null) {
+            int current = getWarehouseStock(product, warehouseCode);
+            delta = targetWarehouseStock - current;
+            if (delta != 0) {
+                setWarehouseStock(product, warehouseCode, warehouseName != null ? warehouseName : warehouseCode, targetWarehouseStock);
+                product.setTotalStock(Math.max(0, beforeTotal + delta));
+            }
+        }
+
+        int nextReserved = reservedStock != null ? Math.max(0, reservedStock) : (product.getReservedStock() != null ? product.getReservedStock() : 0);
+        product.setReservedStock(nextReserved);
+        product.setAvailableStock(Math.max(0, (product.getTotalStock() != null ? product.getTotalStock() : 0) - nextReserved));
+        product.setWarehouseLocation(warehouseLocation);
+        product.setNote(note);
+
+        InventoryTransaction tx = InventoryTransaction.builder()
+            .product(product)
+            .transactionType("ADJUST")
+            .quantity(delta)
+            .beforeStock(beforeTotal)
+            .afterStock(product.getTotalStock())
+            .fromLocation(warehouseName != null ? warehouseName : warehouseCode)
+            .toLocation(warehouseName != null ? warehouseName : warehouseCode)
+            .referenceType("MANUAL")
+            .notes(reason != null && !reason.isBlank() ? reason : "재고현황 수량/제외 내용 수정")
+            .build();
+        transactionRepository.save(tx);
+
+        return productRepository.save(product);
+    }
+
+    private int getWarehouseStock(Product product, String warehouseCode) {
+        return switch (warehouseCode) {
+            case "ANYANG" -> product.getWarehouseStockAnyang() != null ? product.getWarehouseStockAnyang() : 0;
+            case "ICHEON_BOX", "ICHEON_PCS" -> product.getWarehouseStockIcheon() != null ? product.getWarehouseStockIcheon() : 0;
+            case "BUCHEON" -> product.getWarehouseStockBucheon() != null ? product.getWarehouseStockBucheon() : 0;
+            default -> warehouseStockRepository.findByProductIdAndWarehouseCode(product.getProductId(), warehouseCode)
+                .map(ProductWarehouseStock::getStock)
+                .orElse(0);
+        };
+    }
+
+    private void setWarehouseStock(Product product, String warehouseCode, String warehouseName, int stock) {
+        int next = Math.max(0, stock);
+        switch (warehouseCode) {
+            case "ANYANG" -> product.setWarehouseStockAnyang(next);
+            case "ICHEON_BOX", "ICHEON_PCS" -> product.setWarehouseStockIcheon(next);
+            case "BUCHEON" -> product.setWarehouseStockBucheon(next);
+            default -> {
+                ProductWarehouseStock ws = warehouseStockRepository
+                    .findByProductIdAndWarehouseCode(product.getProductId(), warehouseCode)
+                    .orElseGet(() -> ProductWarehouseStock.builder()
+                        .productId(product.getProductId())
+                        .warehouseCode(warehouseCode)
+                        .warehouseName(warehouseName)
+                        .stock(0)
+                        .build());
+                ws.setWarehouseName(warehouseName);
+                ws.setStock(next);
+                warehouseStockRepository.save(ws);
+            }
+        }
     }
 
     /**
@@ -421,6 +509,13 @@ public class InventoryService {
             .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
         return transactionRepository.findByProductAndCreatedAtBetweenOrderByCreatedAtDesc(
             product, startDate, endDate);
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryTransaction> getAllTransactionHistory(UUID productId) {
+        Product product = productRepository.findById(productId)
+            .orElseThrow(() -> new IllegalArgumentException("상품을 찾을 수 없습니다."));
+        return transactionRepository.findByProductOrderByCreatedAtDesc(product);
     }
 
     /**

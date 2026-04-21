@@ -83,6 +83,23 @@ public class InventoryDto {
         private Integer quantity;
         private String reason;
     }
+
+    /**
+     * 재고현황 목록에서 특정 창고 재고/제외 내용을 직접 보정
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StockUpdateRequest {
+        private String warehouseCode;
+        private String warehouseName;
+        private Integer warehouseStock;
+        private Integer reservedStock;
+        private String warehouseLocation;
+        private String note;
+        private String reason;
+    }
     
     /**
      * 거래 내역 응답
@@ -102,6 +119,7 @@ public class InventoryDto {
         private Integer afterStock;
         private String fromLocation;
         private String toLocation;
+        private String referenceType;
         private String notes;
         private String createdBy;
         private LocalDateTime createdAt;

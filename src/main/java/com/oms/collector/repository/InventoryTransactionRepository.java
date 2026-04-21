@@ -26,6 +26,8 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
         LocalDateTime startDate,
         LocalDateTime endDate
     );
+
+    List<InventoryTransaction> findByProductOrderByCreatedAtDesc(Product product);
     
     /**
      * 최근 거래 내역 조회 (FETCH JOIN으로 Product 즉시 로딩)
