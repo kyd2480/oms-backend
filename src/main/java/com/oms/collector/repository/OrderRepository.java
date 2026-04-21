@@ -39,6 +39,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
 
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND (:includeHold = true OR COALESCE(o.shippingHold, false) = false)")
+    Page<Order> findByOrderStatusWithHoldFilter(
+        @Param("status") Order.OrderStatus status,
+        @Param("includeHold") boolean includeHold,
+        Pageable pageable);
+
     /**
      * 상태별 전체 주문 조회 — items JOIN FETCH (N+1 방지)
      */
@@ -52,6 +59,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
            "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
     List<Order> findByOrderStatusAndDateRange(
         @Param("status") Order.OrderStatus status,
+        @Param("start")  java.time.LocalDateTime start,
+        @Param("end")    java.time.LocalDateTime end);
+
+    @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +
+           "AND (:includeHold = true OR COALESCE(o.shippingHold, false) = false) " +
+           "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
+    List<Order> findByOrderStatusAndDateRangeWithHoldFilter(
+        @Param("status") Order.OrderStatus status,
+        @Param("includeHold") boolean includeHold,
         @Param("start")  java.time.LocalDateTime start,
         @Param("end")    java.time.LocalDateTime end);
 

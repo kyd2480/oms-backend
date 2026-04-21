@@ -417,14 +417,16 @@ public class InvoiceController {
         @RequestParam(defaultValue = "200") int size,
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate,
-        @RequestParam(required = false) String printTypeCode
+        @RequestParam(required = false) String printTypeCode,
+        @RequestParam(defaultValue = "false") boolean includeHold
     ) {
         List<Order> orders;
         boolean hasPrintTypeFilter = printTypeCode != null && !printTypeCode.isBlank();
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
-            orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
+            orders = orderRepository.findByOrderStatusAndDateRangeWithHoldFilter(
+                Order.OrderStatus.CONFIRMED, includeHold, start, end);
             if (hasPrintTypeFilter) {
                 orders = orders.stream()
                     .filter(order -> Objects.equals(printTypeCode, order.getPrintTypeCode() != null ? order.getPrintTypeCode() : "NORMAL"))
@@ -435,7 +437,7 @@ public class InvoiceController {
             orders = new ArrayList<>();
             int p = 0; while(true) {
                 var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
+                var sl = orderRepository.findByOrderStatusWithHoldFilter(Order.OrderStatus.CONFIRMED, includeHold, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
             orders = orders.stream()
@@ -444,7 +446,7 @@ public class InvoiceController {
             orders = paginate(orders, page, size);
         } else {
             var pg = PageRequest.of(Math.max(page, 0), Math.max(size, 1), Sort.by(Sort.Direction.DESC, "orderedAt"));
-            orders = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg).getContent();
+            orders = orderRepository.findByOrderStatusWithHoldFilter(Order.OrderStatus.CONFIRMED, includeHold, pg).getContent();
         }
 
         orders.forEach(o -> {
