@@ -333,13 +333,21 @@ public class InvoiceController {
         if (invoiceInfo.carrierCode() == null || invoiceInfo.carrierCode().isBlank()) {
             return;
         }
+        String reqYmd = invoiceInfo.reqYmd();
+        if (reqYmd == null || reqYmd.isBlank()) {
+            // 저장된 신청일자 없으면 updatedAt으로 폴백
+            if (order.getUpdatedAt() != null) {
+                reqYmd = order.getUpdatedAt().toLocalDate()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+            }
+        }
         trackingNumberProvider.cancel(
             invoiceInfo.carrierCode(),
             invoiceInfo.carrierName(),
             order.getOrderNo(),
             invoiceInfo.trackingNo(),
             invoiceInfo.reservationNo(),
-            invoiceInfo.reqYmd()
+            reqYmd
         );
     }
 
