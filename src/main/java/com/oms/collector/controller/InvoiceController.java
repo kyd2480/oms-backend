@@ -420,17 +420,31 @@ public class InvoiceController {
         @RequestParam(required = false) String printTypeCode
     ) {
         List<Order> orders;
+        boolean hasPrintTypeFilter = printTypeCode != null && !printTypeCode.isBlank();
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
             orders = orderRepository.findByOrderStatusAndDateRange(Order.OrderStatus.CONFIRMED, start, end);
-        } else {
+            if (hasPrintTypeFilter) {
+                orders = orders.stream()
+                    .filter(order -> Objects.equals(printTypeCode, order.getPrintTypeCode() != null ? order.getPrintTypeCode() : "NORMAL"))
+                    .collect(Collectors.toList());
+            }
+            orders = paginate(orders, page, size);
+        } else if (hasPrintTypeFilter) {
             orders = new ArrayList<>();
             int p = 0; while(true) {
                 var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
                 var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
+            orders = orders.stream()
+                .filter(order -> Objects.equals(printTypeCode, order.getPrintTypeCode() != null ? order.getPrintTypeCode() : "NORMAL"))
+                .collect(Collectors.toList());
+            orders = paginate(orders, page, size);
+        } else {
+            var pg = PageRequest.of(Math.max(page, 0), Math.max(size, 1), Sort.by(Sort.Direction.DESC, "orderedAt"));
+            orders = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg).getContent();
         }
 
         orders.forEach(o -> {
@@ -441,12 +455,24 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
         List<InvoiceOrderDTO> result = orders.stream()
-            .filter(order -> printTypeCode == null || printTypeCode.isBlank()
-                || Objects.equals(printTypeCode, order.getPrintTypeCode() != null ? order.getPrintTypeCode() : "NORMAL"))
             .map(order -> toInvoiceOrderDTO(order, productMap, fullSenderAddress))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
+    }
+
+    private List<Order> paginate(List<Order> orders, int page, int size) {
+        if (orders == null || orders.isEmpty()) {
+            return List.of();
+        }
+        int normalizedPage = Math.max(page, 0);
+        int normalizedSize = Math.max(size, 1);
+        int from = normalizedPage * normalizedSize;
+        if (from >= orders.size()) {
+            return List.of();
+        }
+        int to = Math.min(from + normalizedSize, orders.size());
+        return new ArrayList<>(orders.subList(from, to));
     }
 
     /**
