@@ -243,6 +243,36 @@ public class TenantSchemaInitService {
         execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_invoice_api_logs_tracking_no ON \"%s\".invoice_api_logs(tracking_no)", s, s));
         execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_invoice_api_logs_created_at ON \"%s\".invoice_api_logs(created_at)", s, s));
 
+        // carrier_contracts
+        execRaw(s, String.format("""
+            CREATE TABLE IF NOT EXISTS "%s".carrier_contracts (
+                contract_id UUID PRIMARY KEY,
+                company_code VARCHAR(20) NOT NULL,
+                carrier_code VARCHAR(50) NOT NULL,
+                carrier_name VARCHAR(100) NOT NULL,
+                contract_name VARCHAR(100) NOT NULL,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                api_base_url VARCHAR(300),
+                auth_key VARCHAR(500),
+                seed_key VARCHAR(500),
+                customer_no VARCHAR(100),
+                contract_approval_no VARCHAR(100),
+                office_ser VARCHAR(50),
+                content_code VARCHAR(50),
+                sender_company_name VARCHAR(100),
+                sender_tel VARCHAR(50),
+                sender_zip VARCHAR(20),
+                sender_address VARCHAR(300),
+                sender_address_detail VARCHAR(300),
+                test_yn VARCHAR(1),
+                print_yn VARCHAR(1),
+                memo VARCHAR(500),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
+            )""", s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_carrier_contracts_company_carrier ON \"%s\".carrier_contracts(company_code, carrier_code)", s, s));
+
         log.info("[TenantInit] 운영 마이그레이션 완료: {}", s);
     }
 
