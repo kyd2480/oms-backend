@@ -77,6 +77,8 @@ public class TenantController {
     @PostMapping("/create/{companyCode}")
     public ResponseEntity<Map<String, Object>> create(@PathVariable String companyCode) {
         String schema = TenantContext.toSchema(companyCode);
+        log.info("[TenantCtrl] 스키마 생성 요청: companyCode={}, schema={}", companyCode, schema);
+
         if (schema.equals("public")) {
             return ResponseEntity.badRequest().body(Map.of(
                 "success", false,
@@ -85,17 +87,21 @@ public class TenantController {
         }
         try {
             initService.initSchema(schema);
+            boolean exists = initService.schemaExists(schema);
+            log.info("[TenantCtrl] 스키마 생성 후 존재 여부: {}", exists);
             return ResponseEntity.ok(Map.of(
                 "success",     true,
                 "companyCode", companyCode.toUpperCase(),
                 "schema",      schema,
+                "exists",      exists,
                 "message",     "스키마 생성 완료: " + schema
             ));
         } catch (Exception e) {
-            log.error("[TenantInit] 스키마 생성 실패: {}", e.getMessage(), e);
+            log.error("[TenantCtrl] 스키마 생성 실패: {} — {}", schema, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
                 "success", false,
-                "message", "스키마 생성 실패: " + e.getMessage()
+                "schema",  schema,
+                "message", e.getMessage()
             ));
         }
     }
