@@ -124,6 +124,28 @@ public class InventoryDto {
         private String createdBy;
         private LocalDateTime createdAt;
     }
+
+    /**
+     * 재고현황 상품 상세의 미발송 주문 내역
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class UnshippedOrderItemResponse {
+        private String orderNo;
+        private String orderedAt;
+        private String salesChannel;
+        private String channelOrderNo;
+        private String productName;
+        private String optionName;
+        private String productCode;
+        private String recipientName;
+        private String customerName;
+        private String invoiceNo;
+        private String shipAvailability;
+        private Integer quantity;
+    }
     
     /**
      * 재고 통계 응답

@@ -4,6 +4,9 @@ import com.oms.collector.dto.InventoryDto;
 import com.oms.collector.dto.ProductDto;
 import com.oms.collector.entity.InventoryTransaction;
 import com.oms.collector.entity.Product;
+import com.oms.collector.entity.Order;
+import com.oms.collector.entity.OrderItem;
+import com.oms.collector.repository.OrderItemRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.ProductSearchService;
@@ -13,7 +16,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -25,6 +31,7 @@ import java.util.stream.Collectors;
 public class InventoryController {
 
     private final ProductRepository productRepository;
+    private final OrderItemRepository orderItemRepository;
     private final InventoryService inventoryService;
     private final ProductSearchService productSearchService;
 
@@ -246,6 +253,26 @@ public class InventoryController {
         return ResponseEntity.ok(transactions.stream().map(this::toTransactionDto).collect(Collectors.toList()));
     }
 
+    @GetMapping("/products/{id}/unshipped-items")
+    public ResponseEntity<List<InventoryDto.UnshippedOrderItemResponse>> getUnshippedItems(@PathVariable UUID id) {
+        return productRepository.findById(id)
+            .map(product -> {
+                Set<String> codes = new LinkedHashSet<>();
+                addIfPresent(codes, product.getSku());
+                addIfPresent(codes, product.getBarcode());
+                addIfPresent(codes, product.getOptionCode());
+                if (codes.isEmpty()) {
+                    return ResponseEntity.ok(List.<InventoryDto.UnshippedOrderItemResponse>of());
+                }
+                List<OrderItem> items = orderItemRepository.findUnshippedByProductCodes(
+                    new ArrayList<>(codes),
+                    List.of(Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED)
+                );
+                return ResponseEntity.ok(items.stream().map(this::toUnshippedDto).collect(Collectors.toList()));
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
     /**
      * 재고 동기화: 레거시 창고 컬럼 기준으로 totalStock/availableStock 재계산
      * product_warehouse_stock 테이블의 레거시 창고(ANYANG/ICHEON_BOX/ICHEON_PCS/BUCHEON) 항목은 삭제 후 정리
@@ -337,5 +364,38 @@ public class InventoryController {
             .createdBy(transaction.getCreatedBy())
             .createdAt(transaction.getCreatedAt())
             .build();
+    }
+
+    private InventoryDto.UnshippedOrderItemResponse toUnshippedDto(OrderItem item) {
+        Order order = item.getOrder();
+        return InventoryDto.UnshippedOrderItemResponse.builder()
+            .orderNo(order != null ? order.getOrderNo() : "")
+            .orderedAt(order != null && order.getOrderedAt() != null ? order.getOrderedAt().toString() : "")
+            .salesChannel(order != null && order.getChannel() != null ? order.getChannel().getChannelName() : "")
+            .channelOrderNo(order != null ? order.getChannelOrderNo() : "")
+            .productName(item.getProductName())
+            .optionName(item.getOptionName())
+            .productCode(item.getProductCode())
+            .recipientName(order != null ? order.getRecipientName() : "")
+            .customerName(order != null ? order.getCustomerName() : "")
+            .invoiceNo(extractInvoiceNo(order != null ? order.getDeliveryMemo() : null))
+            .shipAvailability(order != null && order.getOrderStatus() == Order.OrderStatus.CONFIRMED ? "출고가능" : "출고대기")
+            .quantity(item.getActiveQuantity())
+            .build();
+    }
+
+    private static void addIfPresent(Set<String> target, String value) {
+        if (value != null && !value.isBlank()) {
+            target.add(value.trim());
+        }
+    }
+
+    private static String extractInvoiceNo(String memo) {
+        if (memo == null || memo.isBlank()) return "";
+        int idx = memo.indexOf("TRACKING:");
+        if (idx < 0) return "";
+        String part = memo.substring(idx + "TRACKING:".length());
+        int end = part.indexOf('|');
+        return end >= 0 ? part.substring(0, end) : part;
     }
 }

@@ -37,6 +37,21 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
      * 판매처 상품 코드로 조회
      */
     List<OrderItem> findByChannelProductCode(String channelProductCode);
+
+    @Query("""
+        SELECT i FROM OrderItem i
+        JOIN FETCH i.order o
+        LEFT JOIN FETCH o.channel
+        WHERE i.productCode IN :productCodes
+          AND o.orderStatus IN :statuses
+          AND i.itemStatus <> 'CANCELLED'
+          AND (i.quantity - COALESCE(i.cancelledQuantity, 0)) > 0
+        ORDER BY o.orderedAt ASC, o.orderNo ASC
+        """)
+    List<OrderItem> findUnshippedByProductCodes(
+        @Param("productCodes") List<String> productCodes,
+        @Param("statuses") List<Order.OrderStatus> statuses
+    );
     
     /**
      * 특정 주문의 총 상품 수
