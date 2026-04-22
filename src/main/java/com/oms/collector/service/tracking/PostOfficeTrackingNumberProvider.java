@@ -164,10 +164,15 @@ public class PostOfficeTrackingNumberProvider implements TrackingNumberProvider 
         String trackingNo = getRequiredTagValue(xml, "regiNo");
         String poReqNo = getOptionalTagValue(xml, "reqNo");
         String reservationNo = getOptionalTagValue(xml, "resNo");
+        String deliveryAreaCode = getOptionalTagValue(xml, "delivAreaCd");
+        String arrivalCenterName = getOptionalTagValue(xml, "arrCnpoNm");
+        String deliveryPostOfficeName = getOptionalTagValue(xml, "delivPoNm");
+        String deliveryCourseNo = getOptionalTagValue(xml, "courseNo");
         String reqYmd = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
         log.info("[우체국 API] 송장번호 발급 완료: orderNo={}, trackingNo={}, reqNo={}, resNo={}, reqYmd={}", orderNo, trackingNo, poReqNo, reservationNo, reqYmd);
         return new IssueResult(trackingNo, poReqNo, reservationNo, reqYmd,
-            "POST_OFFICE", "ISSUE", "SUCCESS", "우체국 송장번호 발급 성공", xml);
+            "POST_OFFICE", "ISSUE", "SUCCESS", "우체국 송장번호 발급 성공", xml,
+            deliveryAreaCode, arrivalCenterName, deliveryPostOfficeName, deliveryCourseNo);
     }
 
     private void validateConfiguration() {

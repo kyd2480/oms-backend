@@ -29,10 +29,14 @@ public interface TrackingNumberProvider {
         String apiAction,
         String responseCode,
         String responseMessage,
-        String rawResponse
+        String rawResponse,
+        String deliveryAreaCode,
+        String arrivalCenterName,
+        String deliveryPostOfficeName,
+        String deliveryCourseNo
     ) {
         public IssueResult(String trackingNo, String poReqNo, String reservationNo, String reqYmd) {
-            this(trackingNo, poReqNo, reservationNo, reqYmd, null, null, null, null, null);
+            this(trackingNo, poReqNo, reservationNo, reqYmd, null, null, null, null, null, null, null, null, null);
         }
     }
 

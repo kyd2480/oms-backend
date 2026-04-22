@@ -79,7 +79,18 @@ public class InvoiceController {
     @Value("${tracking.post-office.contract-approval-no:}")
     private String contractApprovalNo;
 
-    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo, String poReqNo, String reservationNo, String reqYmd) {}
+    private record InvoiceInfo(
+        String carrierCode,
+        String carrierName,
+        String trackingNo,
+        String poReqNo,
+        String reservationNo,
+        String reqYmd,
+        String deliveryAreaCode,
+        String arrivalCenterName,
+        String deliveryPostOfficeName,
+        String deliveryCourseNo
+    ) {}
 
     // 택배사 목록
     public static final List<Map<String, String>> CARRIERS = List.of(
@@ -285,7 +296,9 @@ public class InvoiceController {
     }
 
     private static String buildDeliveryMemo(String existingMemo, String carrierCode, String carrierName,
-                                             String trackingNo, String poReqNo, String reservationNo, String reqYmd) {
+                                             String trackingNo, String poReqNo, String reservationNo, String reqYmd,
+                                             String deliveryAreaCode, String arrivalCenterName,
+                                             String deliveryPostOfficeName, String deliveryCourseNo) {
         String deliveryMessage = extractDeliveryMessage(existingMemo);
         List<String> parts = new ArrayList<>();
         if (!deliveryMessage.isBlank()) {
@@ -304,6 +317,18 @@ public class InvoiceController {
         }
         if (reqYmd != null && !reqYmd.isBlank()) {
             invoice.append("|REQ_YMD:").append(reqYmd);
+        }
+        if (deliveryAreaCode != null && !deliveryAreaCode.isBlank()) {
+            invoice.append("|DELIV_AREA_CD:").append(deliveryAreaCode);
+        }
+        if (arrivalCenterName != null && !arrivalCenterName.isBlank()) {
+            invoice.append("|ARR_CNPO_NM:").append(arrivalCenterName);
+        }
+        if (deliveryPostOfficeName != null && !deliveryPostOfficeName.isBlank()) {
+            invoice.append("|DELIV_PO_NM:").append(deliveryPostOfficeName);
+        }
+        if (deliveryCourseNo != null && !deliveryCourseNo.isBlank()) {
+            invoice.append("|COURSE_NO:").append(deliveryCourseNo);
         }
         parts.add(invoice.toString());
         return String.join("|", parts);
@@ -326,6 +351,10 @@ public class InvoiceController {
         String poReqNo = null;
         String reservationNo = null;
         String reqYmd = null;
+        String deliveryAreaCode = null;
+        String arrivalCenterName = null;
+        String deliveryPostOfficeName = null;
+        String deliveryCourseNo = null;
         for (String part : invoiceSegment.split("\\|")) {
             String[] kv = part.split(":", 2);
             if (kv.length != 2) {
@@ -337,8 +366,13 @@ public class InvoiceController {
             if ("PO_REQ_NO".equals(kv[0])) poReqNo = kv[1];
             if ("RES_NO".equals(kv[0])) reservationNo = kv[1];
             if ("REQ_YMD".equals(kv[0])) reqYmd = kv[1];
+            if ("DELIV_AREA_CD".equals(kv[0])) deliveryAreaCode = kv[1];
+            if ("ARR_CNPO_NM".equals(kv[0])) arrivalCenterName = kv[1];
+            if ("DELIV_PO_NM".equals(kv[0])) deliveryPostOfficeName = kv[1];
+            if ("COURSE_NO".equals(kv[0])) deliveryCourseNo = kv[1];
         }
-        return new InvoiceInfo(carrierCode, carrierName, trackingNo, poReqNo, reservationNo, reqYmd);
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo, poReqNo, reservationNo, reqYmd,
+            deliveryAreaCode, arrivalCenterName, deliveryPostOfficeName, deliveryCourseNo);
     }
 
     private void cancelCarrierInvoiceIfNeeded(Order order) {
@@ -552,7 +586,7 @@ public class InvoiceController {
         }
 
         // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
+        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
         orderRepository.save(order);
 
         log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -580,7 +614,7 @@ public class InvoiceController {
                 Order order = orderRepository.findByOrderNo(orderNo).orElse(null);
                 if (order == null) { failed++; continue; }
                 if (Boolean.TRUE.equals(order.getShippingHold())) { failed++; continue; }
-                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null));
+                order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -660,7 +694,8 @@ public class InvoiceController {
             var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
             invoiceApiLogService.logIssueSuccess(orderNo, carrierCode, carrierName, result);
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
-                result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
+                result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd(),
+                result.deliveryAreaCode(), result.arrivalCenterName(), result.deliveryPostOfficeName(), result.deliveryCourseNo()));
             orderRepository.save(order);
 
             String trackingNo = result.trackingNo();
@@ -723,7 +758,8 @@ public class InvoiceController {
                 var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
                 invoiceApiLogService.logIssueSuccess(order.getOrderNo(), carrierCode, carrierName, result);
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
-                    result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
+                    result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd(),
+                    result.deliveryAreaCode(), result.arrivalCenterName(), result.deliveryPostOfficeName(), result.deliveryCourseNo()));
                 orderRepository.save(order);
                 assigned++;
             } catch (IllegalArgumentException | IllegalStateException e) {
@@ -964,6 +1000,20 @@ public class InvoiceController {
     private InvoiceOrderDTO toInvoiceOrderDTO(Order order, Map<String, Product> productMap, String fullSenderAddress) {
         DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo =
             deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
+        InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+        if (invoiceInfo != null && (
+            hasText(invoiceInfo.deliveryAreaCode())
+                || hasText(invoiceInfo.arrivalCenterName())
+                || hasText(invoiceInfo.deliveryPostOfficeName())
+                || hasText(invoiceInfo.deliveryCourseNo())
+        )) {
+            deliveryAreaInfo = new DeliveryAreaCodeService.DeliveryAreaInfo(
+                valueOrDefault(invoiceInfo.deliveryAreaCode(), deliveryAreaInfo.deliveryAreaCode()),
+                valueOrDefault(invoiceInfo.arrivalCenterName(), deliveryAreaInfo.arrivalCenterName()),
+                valueOrDefault(invoiceInfo.deliveryPostOfficeName(), deliveryAreaInfo.deliveryPostOfficeName()),
+                valueOrDefault(invoiceInfo.deliveryCourseNo(), deliveryAreaInfo.courseNo())
+            );
+        }
 
         boolean deliveryAreaConfigured = deliveryAreaCodeService.isConfigured();
         String senderRoutePrimary = deliveryAreaConfigured
@@ -1003,6 +1053,14 @@ public class InvoiceController {
             return address;
         }
         return address + " " + detail;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String valueOrDefault(String value, String fallback) {
+        return hasText(value) ? value : Objects.toString(fallback, "");
     }
 
 }
