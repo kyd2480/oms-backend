@@ -74,6 +74,42 @@ public class AuthService {
         }
     }
 
+    /** 관리자 회사 컨텍스트 전환 */
+    @Transactional(readOnly = true)
+    public LoginResponse switchAdminCompanyContext(String token, String companyCode) {
+        try {
+            String username = jwtTokenUtil.getUsernameFromToken(token);
+            if (!jwtTokenUtil.validateToken(token, username)) {
+                return LoginResponse.failure("유효하지 않은 토큰입니다");
+            }
+
+            String role = jwtTokenUtil.getRoleFromToken(token);
+            if (!User.UserRole.ADMIN.name().equals(role)) {
+                return LoginResponse.failure("관리자만 회사를 선택할 수 있습니다");
+            }
+
+            String normalizedCode = normalizeCompanyCode(companyCode);
+            User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+            if (!user.isEnabled()) {
+                return LoginResponse.failure("비활성화된 계정입니다");
+            }
+
+            String switchedToken = jwtTokenUtil.generateToken(
+                user.getUsername(),
+                user.getRole().name(),
+                normalizedCode
+            );
+            UserDTO switchedUser = UserDTO.from(user);
+            switchedUser.setCompanyCode(normalizedCode);
+            log.info("관리자 회사 컨텍스트 전환: username={}, companyCode={}", username, normalizedCode);
+            return LoginResponse.success(switchedToken, switchedUser);
+        } catch (RuntimeException e) {
+            log.error("관리자 회사 컨텍스트 전환 실패: {}", e.getMessage());
+            return LoginResponse.failure(e.getMessage());
+        }
+    }
+
     public boolean validateToken(String token, String username) {
         return jwtTokenUtil.validateToken(token, username);
     }
@@ -103,5 +139,30 @@ public class AuthService {
             .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
         user.setCompanyCode(companyCode.toUpperCase());
         return UserDTO.from(userRepository.save(user));
+    }
+
+    /** 페이지 권한 변경 (관리자용) */
+    @Transactional
+    public UserDTO updatePagePermissions(java.util.UUID userId, java.util.List<String> pages) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+        // null 또는 빈 리스트 → 전체 허용
+        if (pages == null || pages.isEmpty()) {
+            user.setPagePermissions(null);
+        } else {
+            user.setPagePermissions(String.join(",", pages));
+        }
+        return UserDTO.from(userRepository.save(user));
+    }
+
+    private String normalizeCompanyCode(String companyCode) {
+        String code = companyCode == null ? "C00" : companyCode.trim().toUpperCase();
+        if (code.isBlank()) {
+            code = "C00";
+        }
+        if (!code.matches("[A-Z0-9_]{1,20}")) {
+            throw new RuntimeException("유효하지 않은 회사코드입니다");
+        }
+        return code;
     }
 }

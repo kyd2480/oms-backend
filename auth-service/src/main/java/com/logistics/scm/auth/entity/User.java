@@ -55,6 +55,10 @@ public class User {
     @Column(name = "company_code", length = 20)
     private String companyCode;
 
+    /** 허용된 페이지 키 목록 (쉼표 구분). null = 전체 허용 */
+    @Column(name = "page_permissions", columnDefinition = "TEXT")
+    private String pagePermissions;
+
     @Column(name = "enabled", nullable = false)
     private Boolean enabled = true;
 

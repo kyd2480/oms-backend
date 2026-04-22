@@ -43,6 +43,8 @@ public class SecurityConfig {
 
         config.setAllowedOriginPatterns(List.of(
             "https://stately-bonbon-cc00cb.netlify.app",
+            "https://*.netlify.app",
+            "https://*.railway.app",
             "http://localhost:5173"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));

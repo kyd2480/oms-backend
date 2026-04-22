@@ -44,6 +44,23 @@ public class AuthController {
             : ResponseEntity.badRequest().body(response);
     }
 
+    /** 관리자 회사 컨텍스트 선택 — POST /api/auth/admin/company-context */
+    @PostMapping("/admin/company-context")
+    public ResponseEntity<LoginResponse> switchAdminCompanyContext(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody Map<String, String> body) {
+        String companyCode = body.get("companyCode");
+        if (companyCode == null || companyCode.isBlank()) {
+            return ResponseEntity.badRequest().body(LoginResponse.failure("companyCode 필드가 필요합니다"));
+        }
+
+        String token = authHeader.replace("Bearer ", "");
+        LoginResponse response = authService.switchAdminCompanyContext(token, companyCode);
+        return response.isSuccess()
+            ? ResponseEntity.ok(response)
+            : ResponseEntity.badRequest().body(response);
+    }
+
     /** 토큰 검증 — GET /api/auth/validate */
     @GetMapping("/validate")
     public ResponseEntity<?> validateToken(@RequestHeader("Authorization") String authHeader) {
@@ -76,6 +93,16 @@ public class AuthController {
     @GetMapping("/users")
     public ResponseEntity<List<UserDTO>> listUsers() {
         return ResponseEntity.ok(authService.listAllUsers());
+    }
+
+    /** 페이지 권한 변경 — PUT /api/auth/users/{userId}/permissions (관리자용) */
+    @PutMapping("/users/{userId}/permissions")
+    public ResponseEntity<?> updatePermissions(
+            @PathVariable UUID userId,
+            @RequestBody Map<String, Object> body) {
+        @SuppressWarnings("unchecked")
+        java.util.List<String> pages = (java.util.List<String>) body.get("pages");
+        return ResponseEntity.ok(authService.updatePagePermissions(userId, pages));
     }
 
     /** 회사 코드 변경 — PUT /api/auth/users/{userId}/company-code (관리자용) */
