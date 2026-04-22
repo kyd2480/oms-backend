@@ -204,6 +204,25 @@ public class TenantSchemaInitService {
                 updated_at    TIMESTAMP
             )""", s));
 
+        // sabangnet_integrations
+        execRaw(s, String.format("""
+            CREATE TABLE IF NOT EXISTS "%s".sabangnet_integrations (
+                integration_id UUID PRIMARY KEY,
+                company_code VARCHAR(20) NOT NULL,
+                integration_name VARCHAR(100) NOT NULL,
+                sabangnet_id VARCHAR(100) NOT NULL,
+                api_key VARCHAR(500) NOT NULL,
+                api_base_url VARCHAR(300) NOT NULL,
+                logistics_place_id VARCHAR(100),
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                memo VARCHAR(500),
+                last_collected_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
+            )""", s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_sabangnet_company_code ON \"%s\".sabangnet_integrations(company_code)", s, s));
+        execRaw(s, String.format("CREATE UNIQUE INDEX IF NOT EXISTS uk_%s_sabangnet_company_id ON \"%s\".sabangnet_integrations(company_code, sabangnet_id)", s, s));
+
         log.info("[TenantInit] 운영 마이그레이션 완료: {}", s);
     }
 

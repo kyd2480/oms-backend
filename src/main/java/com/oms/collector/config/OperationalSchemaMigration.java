@@ -20,6 +20,7 @@ public class OperationalSchemaMigration {
         migrateOrderItems();
         migrateProducts();
         migratePrintTypes();
+        migrateSabangnetIntegrations();
         log.info("운영 스키마 보정 완료");
     }
 
@@ -105,6 +106,41 @@ public class OperationalSchemaMigration {
                 updated_at TIMESTAMP
             )
             """);
+    }
+
+    private void migrateSabangnetIntegrations() {
+        migrateSabangnetIntegrationsForSchema("public");
+        jdbcTemplate.queryForList(
+            "SELECT schema_name FROM information_schema.schemata " +
+            "WHERE schema_name NOT IN ('public','information_schema','pg_catalog','pg_toast') " +
+            "  AND schema_name NOT LIKE 'pg_%'",
+            String.class
+        ).forEach(this::migrateSabangnetIntegrationsForSchema);
+    }
+
+    private void migrateSabangnetIntegrationsForSchema(String schema) {
+        if (schema == null || !schema.matches("[a-zA-Z_][a-zA-Z0-9_]{0,62}")) {
+            return;
+        }
+        String prefix = "\"%s\".".formatted(schema);
+        execute("""
+            CREATE TABLE IF NOT EXISTS %ssabangnet_integrations (
+                integration_id UUID PRIMARY KEY,
+                company_code VARCHAR(20) NOT NULL,
+                integration_name VARCHAR(100) NOT NULL,
+                sabangnet_id VARCHAR(100) NOT NULL,
+                api_key VARCHAR(500) NOT NULL,
+                api_base_url VARCHAR(300) NOT NULL,
+                logistics_place_id VARCHAR(100),
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                memo VARCHAR(500),
+                last_collected_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
+            )
+            """.formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_sabangnet_integrations_company_code ON %ssabangnet_integrations(company_code)".formatted(prefix));
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_sabangnet_integrations_company_id ON %ssabangnet_integrations(company_code, sabangnet_id)".formatted(prefix));
     }
 
     private void execute(String sql) {
