@@ -18,6 +18,8 @@ public class SabangnetIntegrationDto {
     private String companyCode;
     private String integrationName;
     private String sabangnetId;
+    private String mallCode;
+    private String mallName;
     private String apiKey;
     private String maskedApiKey;
     private String apiBaseUrl;

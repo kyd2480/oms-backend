@@ -131,6 +131,8 @@ public class OperationalSchemaMigration {
                 company_code VARCHAR(20) NOT NULL,
                 integration_name VARCHAR(100) NOT NULL,
                 sabangnet_id VARCHAR(100) NOT NULL,
+                mall_code VARCHAR(100),
+                mall_name VARCHAR(100),
                 api_key VARCHAR(500) NOT NULL,
                 api_base_url VARCHAR(300) NOT NULL,
                 logistics_place_id VARCHAR(100),
@@ -141,8 +143,11 @@ public class OperationalSchemaMigration {
                 updated_at TIMESTAMP
             )
             """.formatted(prefix));
+        execute("ALTER TABLE %ssabangnet_integrations ADD COLUMN IF NOT EXISTS mall_code VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %ssabangnet_integrations ADD COLUMN IF NOT EXISTS mall_name VARCHAR(100)".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_sabangnet_integrations_company_code ON %ssabangnet_integrations(company_code)".formatted(prefix));
-        execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_sabangnet_integrations_company_id ON %ssabangnet_integrations(company_code, sabangnet_id)".formatted(prefix));
+        execute("DROP INDEX IF EXISTS %suk_sabangnet_integrations_company_id".formatted(prefix));
+        execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_sabangnet_integrations_company_mall ON %ssabangnet_integrations(company_code, sabangnet_id, mall_code) WHERE mall_code IS NOT NULL".formatted(prefix));
     }
 
     private void migrateInvoiceApiLogs() {

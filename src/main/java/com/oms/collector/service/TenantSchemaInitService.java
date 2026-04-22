@@ -211,6 +211,8 @@ public class TenantSchemaInitService {
                 company_code VARCHAR(20) NOT NULL,
                 integration_name VARCHAR(100) NOT NULL,
                 sabangnet_id VARCHAR(100) NOT NULL,
+                mall_code VARCHAR(100),
+                mall_name VARCHAR(100),
                 api_key VARCHAR(500) NOT NULL,
                 api_base_url VARCHAR(300) NOT NULL,
                 logistics_place_id VARCHAR(100),
@@ -221,7 +223,7 @@ public class TenantSchemaInitService {
                 updated_at TIMESTAMP
             )""", s));
         execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_sabangnet_company_code ON \"%s\".sabangnet_integrations(company_code)", s, s));
-        execRaw(s, String.format("CREATE UNIQUE INDEX IF NOT EXISTS uk_%s_sabangnet_company_id ON \"%s\".sabangnet_integrations(company_code, sabangnet_id)", s, s));
+        execRaw(s, String.format("CREATE UNIQUE INDEX IF NOT EXISTS uk_%s_sabangnet_company_mall ON \"%s\".sabangnet_integrations(company_code, sabangnet_id, mall_code) WHERE mall_code IS NOT NULL", s, s));
 
         // invoice_api_logs
         execRaw(s, String.format("""

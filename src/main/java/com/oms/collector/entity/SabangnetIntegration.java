@@ -45,6 +45,12 @@ public class SabangnetIntegration {
     @Column(name = "sabangnet_id", nullable = false, length = 100)
     private String sabangnetId;
 
+    @Column(name = "mall_code", length = 100)
+    private String mallCode;
+
+    @Column(name = "mall_name", length = 100)
+    private String mallName;
+
     @Column(name = "api_key", nullable = false, length = 500)
     private String apiKey;
 

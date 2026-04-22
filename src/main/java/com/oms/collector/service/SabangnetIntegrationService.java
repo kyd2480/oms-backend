@@ -27,14 +27,17 @@ public class SabangnetIntegrationService {
     public SabangnetIntegrationDto create(SabangnetIntegrationDto dto) {
         String companyCode = normalizeCompanyCode(dto.getCompanyCode());
         String sabangnetId = require(dto.getSabangnetId(), "사방넷 ID");
-        if (repository.existsByCompanyCodeIgnoreCaseAndSabangnetIdIgnoreCase(companyCode, sabangnetId)) {
-            throw new IllegalArgumentException("이미 등록된 사방넷 ID입니다");
+        String mallCode = blankToNull(dto.getMallCode());
+        if (mallCode != null && repository.existsByCompanyCodeIgnoreCaseAndSabangnetIdIgnoreCaseAndMallCodeIgnoreCase(companyCode, sabangnetId, mallCode)) {
+            throw new IllegalArgumentException("이미 등록된 사방넷 쇼핑몰 코드입니다");
         }
 
         SabangnetIntegration entity = SabangnetIntegration.builder()
             .companyCode(companyCode)
             .integrationName(require(dto.getIntegrationName(), "설정명"))
             .sabangnetId(sabangnetId)
+            .mallCode(mallCode)
+            .mallName(require(dto.getMallName(), "쇼핑몰명"))
             .apiKey(require(dto.getApiKey(), "API 인증키"))
             .apiBaseUrl(normalizeApiBaseUrl(dto.getApiBaseUrl()))
             .logisticsPlaceId(blankToNull(dto.getLogisticsPlaceId()))
@@ -52,6 +55,8 @@ public class SabangnetIntegrationService {
         entity.setCompanyCode(normalizeCompanyCode(dto.getCompanyCode()));
         entity.setIntegrationName(require(dto.getIntegrationName(), "설정명"));
         entity.setSabangnetId(require(dto.getSabangnetId(), "사방넷 ID"));
+        entity.setMallCode(blankToNull(dto.getMallCode()));
+        entity.setMallName(require(dto.getMallName(), "쇼핑몰명"));
         if (dto.getApiKey() != null && !dto.getApiKey().isBlank() && !dto.getApiKey().contains("*")) {
             entity.setApiKey(dto.getApiKey().trim());
         }
@@ -84,6 +89,8 @@ public class SabangnetIntegrationService {
             .companyCode(entity.getCompanyCode())
             .integrationName(entity.getIntegrationName())
             .sabangnetId(entity.getSabangnetId())
+            .mallCode(entity.getMallCode())
+            .mallName(entity.getMallName())
             .maskedApiKey(mask(entity.getApiKey()))
             .apiBaseUrl(entity.getApiBaseUrl())
             .logisticsPlaceId(entity.getLogisticsPlaceId())
