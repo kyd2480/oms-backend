@@ -26,12 +26,10 @@ public class UserDTO {
     private String name;
     private String email;
     private String role;
+    private String companyCode;
     private Boolean enabled;
     private LocalDateTime lastLoginAt;
 
-    /**
-     * Entity를 DTO로 변환
-     */
     public static UserDTO from(User user) {
         return UserDTO.builder()
                 .userId(user.getUserId())
@@ -39,6 +37,7 @@ public class UserDTO {
                 .name(user.getName())
                 .email(user.getEmail())
                 .role(user.getRole().name())
+                .companyCode(user.getCompanyCode() != null ? user.getCompanyCode() : "C00")
                 .enabled(user.getEnabled())
                 .lastLoginAt(user.getLastLoginAt())
                 .build();

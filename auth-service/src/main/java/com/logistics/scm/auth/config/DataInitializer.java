@@ -35,42 +35,30 @@ public class DataInitializer {
 
             // 1. Admin 계정 생성
             if (!userRepository.existsByUsername("admin")) {
-                User admin = User.create(
-                    "admin",
-                    passwordEncoder.encode("admin123"),
-                    "관리자",
-                    "admin@oms.com",
-                    User.UserRole.ADMIN
-                );
+                User admin = User.create("admin", passwordEncoder.encode("admin123"),
+                    "관리자", "admin@oms.com", User.UserRole.ADMIN, "C00");
                 userRepository.save(admin);
-                log.info("✅ Admin 계정 생성: admin / admin123");
+                log.info("✅ Admin 계정 생성: admin / admin123 (C00)");
             }
 
-            // 2. Manager 계정 생성
             if (!userRepository.existsByUsername("manager")) {
-                User manager = User.create(
-                    "manager",
-                    passwordEncoder.encode("manager123"),
-                    "매니저",
-                    "manager@oms.com",
-                    User.UserRole.MANAGER
-                );
+                User manager = User.create("manager", passwordEncoder.encode("manager123"),
+                    "매니저", "manager@oms.com", User.UserRole.MANAGER, "C00");
                 userRepository.save(manager);
-                log.info("✅ Manager 계정 생성: manager / manager123");
+                log.info("✅ Manager 계정 생성: manager / manager123 (C00)");
             }
 
-            // 3. User 계정 생성
             if (!userRepository.existsByUsername("user")) {
-                User user = User.create(
-                    "user",
-                    passwordEncoder.encode("user123"),
-                    "사용자",
-                    "user@oms.com",
-                    User.UserRole.USER
-                );
+                User user = User.create("user", passwordEncoder.encode("user123"),
+                    "사용자", "user@oms.com", User.UserRole.USER, "C00");
                 userRepository.save(user);
-                log.info("✅ User 계정 생성: user / user123");
+                log.info("✅ User 계정 생성: user / user123 (C00)");
             }
+
+            // 기존 계정 중 companyCode가 null인 경우 C00 기본값 설정
+            userRepository.findAll().stream()
+                .filter(u -> u.getCompanyCode() == null)
+                .forEach(u -> { u.setCompanyCode("C00"); userRepository.save(u); });
 
             log.info("=== 초기 데이터 생성 완료 ===");
             log.info("총 사용자 수: {}", userRepository.count());

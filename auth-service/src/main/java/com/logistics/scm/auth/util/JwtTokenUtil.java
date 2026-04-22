@@ -73,13 +73,17 @@ public class JwtTokenUtil {
         return expiration.before(new Date());
     }
 
-    /**
-     * 사용자 정보로 토큰 생성
-     */
-    public String generateToken(String username, String role) {
+    public String generateToken(String username, String role, String companyCode) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("role", role);
+        claims.put("companyCode", companyCode != null ? companyCode : "C00");
         return doGenerateToken(claims, username);
+    }
+
+    public String getCompanyCodeFromToken(String token) {
+        final Claims claims = getAllClaimsFromToken(token);
+        Object code = claims.get("companyCode");
+        return code != null ? code.toString() : "C00";
     }
 
     /**

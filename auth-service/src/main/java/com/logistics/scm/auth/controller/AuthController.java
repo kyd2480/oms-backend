@@ -3,12 +3,17 @@ package com.logistics.scm.auth.controller;
 import com.logistics.scm.auth.dto.LoginRequest;
 import com.logistics.scm.auth.dto.LoginResponse;
 import com.logistics.scm.auth.dto.SignupRequest;
+import com.logistics.scm.auth.dto.UserDTO;
 import com.logistics.scm.auth.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -64,6 +69,35 @@ public class AuthController {
             return ResponseEntity.ok(new CurrentUserResponse(username, role));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("사용자 정보 조회 실패");
+        }
+    }
+
+    /** 전체 사용자 목록 — GET /api/auth/users (관리자용) */
+    @GetMapping("/users")
+    public ResponseEntity<List<UserDTO>> listUsers() {
+        return ResponseEntity.ok(authService.listAllUsers());
+    }
+
+    /** 회사 코드 변경 — PUT /api/auth/users/{userId}/company-code (관리자용) */
+    @PutMapping("/users/{userId}/company-code")
+    public ResponseEntity<?> updateCompanyCode(
+            @PathVariable UUID userId,
+            @RequestBody Map<String, String> body) {
+        String code = body.get("companyCode");
+        if (code == null || code.isBlank())
+            return ResponseEntity.badRequest().body(Map.of("message", "companyCode 필드가 필요합니다"));
+        return ResponseEntity.ok(authService.updateCompanyCode(userId, code));
+    }
+
+    /** 현재 토큰의 회사 코드 반환 — GET /api/auth/company-code */
+    @GetMapping("/company-code")
+    public ResponseEntity<?> getCompanyCode(@RequestHeader("Authorization") String authHeader) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String code  = authService.getCompanyCodeFromToken(token);
+            return ResponseEntity.ok(Map.of("companyCode", code));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "토큰 파싱 실패"));
         }
     }
 

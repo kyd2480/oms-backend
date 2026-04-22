@@ -30,16 +30,20 @@ public class AuthService {
         if (userRepository.existsByEmail(request.getEmail()))
             return LoginResponse.failure("이미 사용 중인 이메일입니다");
 
+        String companyCode = (request.getCompanyCode() != null && !request.getCompanyCode().isBlank())
+            ? request.getCompanyCode().toUpperCase() : "C00";
+
         User user = User.create(
             request.getUsername(),
             passwordEncoder.encode(request.getPassword()),
             request.getName(),
             request.getEmail(),
-            User.UserRole.USER
+            User.UserRole.USER,
+            companyCode
         );
         userRepository.save(user);
 
-        String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name());
+        String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
         log.info("회원가입 완료: username={}", user.getUsername());
         return LoginResponse.success(token, UserDTO.from(user));
     }
@@ -60,7 +64,7 @@ public class AuthService {
             user.updateLastLoginTime();
             userRepository.save(user);
 
-            String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name());
+            String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
             log.info("로그인 성공: username={}, role={}", user.getUsername(), user.getRole());
             return LoginResponse.success(token, UserDTO.from(user));
 
@@ -80,5 +84,24 @@ public class AuthService {
 
     public String getRoleFromToken(String token) {
         return jwtTokenUtil.getRoleFromToken(token);
+    }
+
+    public String getCompanyCodeFromToken(String token) {
+        return jwtTokenUtil.getCompanyCodeFromToken(token);
+    }
+
+    /** 모든 사용자 목록 (관리자용) */
+    @Transactional(readOnly = true)
+    public java.util.List<UserDTO> listAllUsers() {
+        return userRepository.findAll().stream().map(UserDTO::from).toList();
+    }
+
+    /** 회사 코드 변경 (관리자용) */
+    @Transactional
+    public UserDTO updateCompanyCode(java.util.UUID userId, String companyCode) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+        user.setCompanyCode(companyCode.toUpperCase());
+        return UserDTO.from(userRepository.save(user));
     }
 }

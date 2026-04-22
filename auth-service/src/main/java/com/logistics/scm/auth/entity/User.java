@@ -52,6 +52,9 @@ public class User {
     @Column(name = "role", nullable = false, length = 20)
     private UserRole role = UserRole.USER;
 
+    @Column(name = "company_code", length = 20)
+    private String companyCode;
+
     @Column(name = "enabled", nullable = false)
     private Boolean enabled = true;
 
@@ -88,13 +91,14 @@ public class User {
     }
 
     // Builder Pattern
-    public static User create(String username, String password, String name, String email, UserRole role) {
+    public static User create(String username, String password, String name, String email, UserRole role, String companyCode) {
         User user = new User();
         user.username = username;
         user.password = password;
         user.name = name;
         user.email = email;
         user.role = role;
+        user.companyCode = companyCode != null ? companyCode.toUpperCase() : "C00";
         user.enabled = true;
         return user;
     }
