@@ -1,11 +1,13 @@
 package com.oms.collector.controller;
 
+import com.oms.collector.config.TenantContext;
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.WorkLockService;
 import com.oms.collector.service.market.MarketShipmentSyncService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -45,11 +47,14 @@ public class AllocationController {
 
     private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
+    private static final int SCAN_LOCK_TTL = 15; // 초
+
     private final OrderRepository   orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService  inventoryService;
     private final MarketShipmentSyncService marketShipmentSyncService;
     private final JdbcTemplate jdbcTemplate;
+    private final WorkLockService workLockService;
 
     // ─── 인메모리 창고 설정 저장 (간단한 구현) ────────────────
     // 실제 운영 시 DB 테이블로 관리 권장
@@ -177,6 +182,11 @@ public class AllocationController {
             ));
         }
 
+        // 같은 송장번호 단위로만 짧은 락 (서로 다른 송장은 동시 처리 가능)
+        String scanLockKey = "INVOICE_SCAN:" + invoiceInfo.trackingNo();
+        workLockService.acquire(scanLockKey, TenantContext.getCurrentUser(), SCAN_LOCK_TTL);
+        try {
+
         order.getItems().size();
 
         for (OrderItem item : order.getItems()) {
@@ -212,6 +222,9 @@ public class AllocationController {
             "marketSyncSuccess", syncResult.success(),
             "marketSyncMessage", syncResult.message()
         ));
+        } finally {
+            workLockService.release(scanLockKey);
+        }
     }
 
     /**

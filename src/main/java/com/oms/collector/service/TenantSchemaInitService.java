@@ -275,6 +275,16 @@ public class TenantSchemaInitService {
             )""", s));
         execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_carrier_contracts_company_carrier ON \"%s\".carrier_contracts(company_code, carrier_code)", s, s));
 
+        // work_locks
+        execRaw(s, String.format("""
+            CREATE TABLE IF NOT EXISTS "%s".work_locks (
+                lock_key   VARCHAR(200) PRIMARY KEY,
+                locked_by  VARCHAR(100) NOT NULL,
+                locked_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP    NOT NULL
+            )""", s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_work_locks_expires_at ON \"%s\".work_locks(expires_at)", s, s));
+
         log.info("[TenantInit] 운영 마이그레이션 완료: {}", s);
     }
 

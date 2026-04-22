@@ -1,5 +1,6 @@
 package com.oms.collector.controller;
 
+import com.oms.collector.config.TenantContext;
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.Product;
@@ -7,6 +8,7 @@ import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.InvoiceApiLogService;
+import com.oms.collector.service.WorkLockService;
 import com.oms.collector.service.postoffice.DeliveryAreaCodeService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
 import com.oms.collector.entity.InvoiceApiLog;
@@ -48,12 +50,15 @@ public class InvoiceController {
     private static final String INVOICE_PREFIX = "INVOICE:";
     private static final String MESSAGE_PREFIX = "MESSAGE_B64:";
 
+    private static final int ORDER_LOCK_TTL = 30; // 초
+
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
     private final DeliveryAreaCodeService deliveryAreaCodeService;
     private final TrackingNumberProvider trackingNumberProvider;
     private final InvoiceApiLogService invoiceApiLogService;
+    private final WorkLockService workLockService;
 
     @Value("${tracking.post-office.order-company-name:}")
     private String senderCompanyName;
@@ -575,22 +580,27 @@ public class InvoiceController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "필수값 누락"));
         }
 
-        Order order = orderRepository.findByOrderNo(orderNo)
-            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+        String lockKey = "ORDER:" + orderNo;
+        workLockService.acquire(lockKey, TenantContext.getCurrentUser(), ORDER_LOCK_TTL);
+        try {
+            Order order = orderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
 
-        if (Boolean.TRUE.equals(order.getShippingHold())) {
-            return ResponseEntity.badRequest().body(Map.of(
-                "success", false,
-                "message", "보류 주문은 송장번호를 저장할 수 없습니다: " + Objects.toString(order.getHoldReason(), "")
-            ));
+            if (Boolean.TRUE.equals(order.getShippingHold())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", "보류 주문은 송장번호를 저장할 수 없습니다: " + Objects.toString(order.getHoldReason(), "")
+                ));
+            }
+
+            order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
+            orderRepository.save(order);
+
+            log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
+            return ResponseEntity.ok(Map.of("success", true, "message", "송장 저장 완료"));
+        } finally {
+            workLockService.release(lockKey);
         }
-
-        // deliveryMemo에 송장 정보 저장
-        order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
-        orderRepository.save(order);
-
-        log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
-        return ResponseEntity.ok(Map.of("success", true, "message", "송장 저장 완료"));
     }
 
     /**
@@ -680,6 +690,8 @@ public class InvoiceController {
         String carrierCode = body != null ? body.getOrDefault("carrierCode", "POST") : "POST";
         String carrierName = body != null ? body.getOrDefault("carrierName", "우체국택배") : "우체국택배";
 
+        String lockKey = "ORDER:" + orderNo;
+        workLockService.acquire(lockKey, TenantContext.getCurrentUser(), ORDER_LOCK_TTL);
         try {
             Order order = orderRepository.findByOrderNo(orderNo)
                 .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
@@ -720,6 +732,8 @@ public class InvoiceController {
                 "success", false,
                 "message", "송장 자동 부여 처리 중 서버 오류가 발생했습니다."
             ));
+        } finally {
+            workLockService.release(lockKey);
         }
     }
 
@@ -915,22 +929,25 @@ public class InvoiceController {
     public ResponseEntity<Map<String, Object>> deleteInvoice(
         @PathVariable String orderNo
     ) {
-        Order order = orderRepository.findByOrderNo(orderNo)
-            .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
-
+        String lockKey = "ORDER:" + orderNo;
+        workLockService.acquire(lockKey, TenantContext.getCurrentUser(), ORDER_LOCK_TTL);
         try {
+            Order order = orderRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new RuntimeException("주문을 찾을 수 없습니다: " + orderNo));
+
             cancelCarrierInvoiceIfNeeded(order);
             order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
             orderRepository.save(order);
             log.info("송장삭제: {}", orderNo);
             return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));
         } catch (IllegalArgumentException | IllegalStateException e) {
-            log.warn("송장삭제 실패 - 우체국 취소가 실패하여 로컬 송장을 유지합니다. orderNo={}, reason={}",
-                orderNo, e.getMessage());
+            log.warn("송장삭제 실패 - 우체국 취소 실패로 로컬 송장 유지. orderNo={}, reason={}", orderNo, e.getMessage());
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                 "success", false,
                 "message", "우체국 취소 실패: 송장이 유지되었습니다. " + e.getMessage()
             ));
+        } finally {
+            workLockService.release(lockKey);
         }
     }
 

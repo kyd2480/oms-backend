@@ -6,11 +6,14 @@ package com.oms.collector.config;
  */
 public class TenantContext {
 
-    private static final ThreadLocal<String> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<String> CURRENT      = new ThreadLocal<>();
+    private static final ThreadLocal<String> CURRENT_USER = new ThreadLocal<>();
 
-    public static void setCurrentTenant(String schema) { CURRENT.set(schema); }
-    public static String getCurrentTenant()             { return CURRENT.get(); }
-    public static void clear()                          { CURRENT.remove(); }
+    public static void setCurrentTenant(String schema)   { CURRENT.set(schema); }
+    public static String getCurrentTenant()               { return CURRENT.get(); }
+    public static void setCurrentUser(String username)    { CURRENT_USER.set(username); }
+    public static String getCurrentUser()                 { String u = CURRENT_USER.get(); return u != null ? u : "unknown"; }
+    public static void clear()                            { CURRENT.remove(); CURRENT_USER.remove(); }
 
     /** 회사코드(C00, C01…)를 PostgreSQL 스키마명으로 변환 */
     public static String toSchema(String companyCode) {

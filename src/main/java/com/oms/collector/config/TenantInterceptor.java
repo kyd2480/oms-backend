@@ -21,14 +21,18 @@ public class TenantInterceptor implements HandlerInterceptor {
 
     private static final Pattern CODE_PATTERN =
         Pattern.compile("\"companyCode\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern SUB_PATTERN =
+        Pattern.compile("\"sub\"\\s*:\\s*\"([^\"]+)\"");
 
     @Override
     public boolean preHandle(HttpServletRequest req, HttpServletResponse res, Object handler) {
         String auth = req.getHeader("Authorization");
         String schema = "public";
         if (auth != null && auth.startsWith("Bearer ")) {
-            String companyCode = extractCompanyCode(auth.substring(7));
+            String token = auth.substring(7);
+            String companyCode = extractCompanyCode(token);
             schema = TenantContext.toSchema(companyCode);
+            TenantContext.setCurrentUser(extractUsername(token));
         }
         TenantContext.setCurrentTenant(schema);
         return true;
@@ -40,19 +44,33 @@ public class TenantInterceptor implements HandlerInterceptor {
         TenantContext.clear();
     }
 
+    private String decodePayload(String token) {
+        String[] parts = token.split("\\.");
+        if (parts.length < 2) return "{}";
+        String payload = parts[1];
+        int mod = payload.length() % 4;
+        if (mod == 2) payload += "==";
+        else if (mod == 3) payload += "=";
+        return new String(Base64.getUrlDecoder().decode(payload), StandardCharsets.UTF_8);
+    }
+
     private String extractCompanyCode(String token) {
         try {
-            String[] parts = token.split("\\.");
-            if (parts.length < 2) return "C00";
-            String payload = parts[1];
-            int mod = payload.length() % 4;
-            if (mod == 2) payload += "==";
-            else if (mod == 3) payload += "=";
-            String json = new String(Base64.getUrlDecoder().decode(payload), StandardCharsets.UTF_8);
+            String json = decodePayload(token);
             Matcher m = CODE_PATTERN.matcher(json);
             return m.find() ? m.group(1) : "C00";
         } catch (Exception e) {
             return "C00";
+        }
+    }
+
+    private String extractUsername(String token) {
+        try {
+            String json = decodePayload(token);
+            Matcher m = SUB_PATTERN.matcher(json);
+            return m.find() ? m.group(1) : "unknown";
+        } catch (Exception e) {
+            return "unknown";
         }
     }
 }

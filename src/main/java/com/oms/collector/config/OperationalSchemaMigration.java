@@ -23,6 +23,7 @@ public class OperationalSchemaMigration {
         migrateSabangnetIntegrations();
         migrateInvoiceApiLogs();
         migrateCarrierContracts();
+        migrateWorkLocks();
         log.info("운영 스키마 보정 완료");
     }
 
@@ -228,6 +229,30 @@ public class OperationalSchemaMigration {
             )
             """.formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_carrier_contracts_company_carrier ON %scarrier_contracts(company_code, carrier_code)".formatted(prefix));
+    }
+
+    private void migrateWorkLocks() {
+        migrateWorkLocksForSchema("public");
+        jdbcTemplate.queryForList(
+            "SELECT schema_name FROM information_schema.schemata " +
+            "WHERE schema_name NOT IN ('public','information_schema','pg_catalog','pg_toast') " +
+            "  AND schema_name NOT LIKE 'pg_%'",
+            String.class
+        ).forEach(this::migrateWorkLocksForSchema);
+    }
+
+    private void migrateWorkLocksForSchema(String schema) {
+        if (schema == null || !schema.matches("[a-zA-Z_][a-zA-Z0-9_]{0,62}")) return;
+        String prefix = "\"%s\".".formatted(schema);
+        execute("""
+            CREATE TABLE IF NOT EXISTS %swork_locks (
+                lock_key   VARCHAR(200) PRIMARY KEY,
+                locked_by  VARCHAR(100) NOT NULL,
+                locked_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP    NOT NULL
+            )
+            """.formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_work_locks_expires_at ON %swork_locks(expires_at)".formatted(prefix));
     }
 
     private void execute(String sql) {
