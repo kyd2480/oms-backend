@@ -20,7 +20,34 @@ public interface TrackingNumberProvider {
      * reservationNo : 우체국 예약번호 (resNo, 16자리, 일자당 부여) — 취소 필수
      * reqYmd        : 신청일자 yyyyMMdd
      */
-    record IssueResult(String trackingNo, String poReqNo, String reservationNo, String reqYmd) {}
+    record IssueResult(
+        String trackingNo,
+        String poReqNo,
+        String reservationNo,
+        String reqYmd,
+        String apiProvider,
+        String apiAction,
+        String responseCode,
+        String responseMessage,
+        String rawResponse
+    ) {
+        public IssueResult(String trackingNo, String poReqNo, String reservationNo, String reqYmd) {
+            this(trackingNo, poReqNo, reservationNo, reqYmd, null, null, null, null, null);
+        }
+    }
+
+    record CancelResult(
+        boolean success,
+        String apiProvider,
+        String apiAction,
+        String responseCode,
+        String responseMessage,
+        String rawResponse
+    ) {
+        public static CancelResult ok() {
+            return new CancelResult(true, null, null, null, null, null);
+        }
+    }
 
     /**
      * 송장번호 단건 발급
@@ -47,6 +74,12 @@ public interface TrackingNumberProvider {
         if (!supports(carrierCode)) {
             throw new UnsupportedOperationException("해당 택배사 송장취소를 지원하지 않습니다: " + carrierCode);
         }
+    }
+
+    default CancelResult cancelWithResult(String carrierCode, String carrierName, String poReqNo,
+                                          String trackingNo, String reservationNo, String reqYmd) {
+        cancel(carrierCode, carrierName, poReqNo, trackingNo, reservationNo, reqYmd);
+        return CancelResult.ok();
     }
 
     default boolean supports(String carrierCode) {

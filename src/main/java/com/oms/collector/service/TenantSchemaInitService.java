@@ -223,6 +223,26 @@ public class TenantSchemaInitService {
         execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_sabangnet_company_code ON \"%s\".sabangnet_integrations(company_code)", s, s));
         execRaw(s, String.format("CREATE UNIQUE INDEX IF NOT EXISTS uk_%s_sabangnet_company_id ON \"%s\".sabangnet_integrations(company_code, sabangnet_id)", s, s));
 
+        // invoice_api_logs
+        execRaw(s, String.format("""
+            CREATE TABLE IF NOT EXISTS "%s".invoice_api_logs (
+                log_id UUID PRIMARY KEY,
+                order_no VARCHAR(100),
+                tracking_no VARCHAR(100),
+                carrier_code VARCHAR(50),
+                carrier_name VARCHAR(100),
+                action_type VARCHAR(30) NOT NULL,
+                api_provider VARCHAR(50),
+                success BOOLEAN NOT NULL,
+                response_code VARCHAR(100),
+                response_message TEXT,
+                raw_response TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""", s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_invoice_api_logs_order_no ON \"%s\".invoice_api_logs(order_no)", s, s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_invoice_api_logs_tracking_no ON \"%s\".invoice_api_logs(tracking_no)", s, s));
+        execRaw(s, String.format("CREATE INDEX IF NOT EXISTS idx_%s_invoice_api_logs_created_at ON \"%s\".invoice_api_logs(created_at)", s, s));
+
         log.info("[TenantInit] 운영 마이그레이션 완료: {}", s);
     }
 

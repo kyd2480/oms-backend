@@ -6,8 +6,10 @@ import com.oms.collector.entity.Product;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.service.InventoryService;
+import com.oms.collector.service.InvoiceApiLogService;
 import com.oms.collector.service.postoffice.DeliveryAreaCodeService;
 import com.oms.collector.service.tracking.TrackingNumberProvider;
+import com.oms.collector.entity.InvoiceApiLog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +53,7 @@ public class InvoiceController {
     private final InventoryService inventoryService;
     private final DeliveryAreaCodeService deliveryAreaCodeService;
     private final TrackingNumberProvider trackingNumberProvider;
+    private final InvoiceApiLogService invoiceApiLogService;
 
     @Value("${tracking.post-office.order-company-name:}")
     private String senderCompanyName;
@@ -355,14 +358,20 @@ public class InvoiceController {
         }
         // poReqNo = 우체국 18자리 소포신청번호 (취소 API의 reqNo 필드에 필요)
         String poReqNo = invoiceInfo.poReqNo();
-        trackingNumberProvider.cancel(
-            invoiceInfo.carrierCode(),
-            invoiceInfo.carrierName(),
-            poReqNo,
-            invoiceInfo.trackingNo(),
-            invoiceInfo.reservationNo(),
-            reqYmd
-        );
+        try {
+            var result = trackingNumberProvider.cancelWithResult(
+                invoiceInfo.carrierCode(),
+                invoiceInfo.carrierName(),
+                poReqNo,
+                invoiceInfo.trackingNo(),
+                invoiceInfo.reservationNo(),
+                reqYmd
+            );
+            invoiceApiLogService.logCancelSuccess(order.getOrderNo(), invoiceInfo.carrierCode(), invoiceInfo.carrierName(), invoiceInfo.trackingNo(), result);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            invoiceApiLogService.logFailure(order.getOrderNo(), invoiceInfo.trackingNo(), invoiceInfo.carrierCode(), invoiceInfo.carrierName(), InvoiceApiLog.ActionType.CANCEL, e);
+            throw e;
+        }
     }
 
     /**
@@ -403,6 +412,42 @@ public class InvoiceController {
     @GetMapping("/carriers")
     public ResponseEntity<List<Map<String, String>>> getCarriers() {
         return ResponseEntity.ok(CARRIERS);
+    }
+
+    /**
+     * 우체국/택배사 API 응답 로그 조회
+     * GET /api/invoice/api-logs?orderNo=OMS-... 또는 ?trackingNo=...
+     */
+    @GetMapping("/api-logs")
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<Map<String, Object>>> getInvoiceApiLogs(
+        @RequestParam(required = false) String orderNo,
+        @RequestParam(required = false) String trackingNo
+    ) {
+        List<InvoiceApiLog> logs;
+        if (orderNo != null && !orderNo.isBlank()) {
+            logs = invoiceApiLogService.findByOrderNo(orderNo.trim());
+        } else if (trackingNo != null && !trackingNo.isBlank()) {
+            logs = invoiceApiLogService.findByTrackingNo(trackingNo.trim());
+        } else {
+            return ResponseEntity.badRequest().body(List.of());
+        }
+        return ResponseEntity.ok(logs.stream().map(log -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("logId", log.getLogId());
+            row.put("orderNo", log.getOrderNo());
+            row.put("trackingNo", log.getTrackingNo());
+            row.put("carrierCode", log.getCarrierCode());
+            row.put("carrierName", log.getCarrierName());
+            row.put("actionType", log.getActionType());
+            row.put("apiProvider", log.getApiProvider());
+            row.put("success", log.getSuccess());
+            row.put("responseCode", log.getResponseCode());
+            row.put("responseMessage", log.getResponseMessage());
+            row.put("rawResponse", log.getRawResponse());
+            row.put("createdAt", log.getCreatedAt());
+            return row;
+        }).toList());
     }
 
     /**
@@ -613,6 +658,7 @@ public class InvoiceController {
             }
 
             var result = trackingNumberProvider.issue(carrierCode, carrierName, orderNo);
+            invoiceApiLogService.logIssueSuccess(orderNo, carrierCode, carrierName, result);
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
                 result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
             orderRepository.save(order);
@@ -627,6 +673,7 @@ public class InvoiceController {
                 "message", "송장번호 자동 부여 완료: " + trackingNo
             ));
         } catch (IllegalArgumentException | IllegalStateException e) {
+            invoiceApiLogService.logFailure(orderNo, null, carrierCode, carrierName, InvoiceApiLog.ActionType.ISSUE, e);
             log.error("송장 자동부여 실패: {} - {}", orderNo, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
                 "success", false,
@@ -674,11 +721,13 @@ public class InvoiceController {
             }
             try {
                 var result = trackingNumberProvider.issue(carrierCode, carrierName, order.getOrderNo());
+                invoiceApiLogService.logIssueSuccess(order.getOrderNo(), carrierCode, carrierName, result);
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
                     result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd()));
                 orderRepository.save(order);
                 assigned++;
             } catch (IllegalArgumentException | IllegalStateException e) {
+                invoiceApiLogService.logFailure(order.getOrderNo(), null, carrierCode, carrierName, InvoiceApiLog.ActionType.ISSUE, e);
                 log.error("송장 일괄 자동부여 실패: {} - {}", order.getOrderNo(), e.getMessage(), e);
                 failedOrders.add(Map.of(
                     "orderNo", order.getOrderNo(),

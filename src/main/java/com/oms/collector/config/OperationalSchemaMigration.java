@@ -21,6 +21,7 @@ public class OperationalSchemaMigration {
         migrateProducts();
         migratePrintTypes();
         migrateSabangnetIntegrations();
+        migrateInvoiceApiLogs();
         log.info("운영 스키마 보정 완료");
     }
 
@@ -141,6 +142,42 @@ public class OperationalSchemaMigration {
             """.formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_sabangnet_integrations_company_code ON %ssabangnet_integrations(company_code)".formatted(prefix));
         execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_sabangnet_integrations_company_id ON %ssabangnet_integrations(company_code, sabangnet_id)".formatted(prefix));
+    }
+
+    private void migrateInvoiceApiLogs() {
+        migrateInvoiceApiLogsForSchema("public");
+        jdbcTemplate.queryForList(
+            "SELECT schema_name FROM information_schema.schemata " +
+            "WHERE schema_name NOT IN ('public','information_schema','pg_catalog','pg_toast') " +
+            "  AND schema_name NOT LIKE 'pg_%'",
+            String.class
+        ).forEach(this::migrateInvoiceApiLogsForSchema);
+    }
+
+    private void migrateInvoiceApiLogsForSchema(String schema) {
+        if (schema == null || !schema.matches("[a-zA-Z_][a-zA-Z0-9_]{0,62}")) {
+            return;
+        }
+        String prefix = "\"%s\".".formatted(schema);
+        execute("""
+            CREATE TABLE IF NOT EXISTS %sinvoice_api_logs (
+                log_id UUID PRIMARY KEY,
+                order_no VARCHAR(100),
+                tracking_no VARCHAR(100),
+                carrier_code VARCHAR(50),
+                carrier_name VARCHAR(100),
+                action_type VARCHAR(30) NOT NULL,
+                api_provider VARCHAR(50),
+                success BOOLEAN NOT NULL,
+                response_code VARCHAR(100),
+                response_message TEXT,
+                raw_response TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """.formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_order_no ON %sinvoice_api_logs(order_no)".formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_tracking_no ON %sinvoice_api_logs(tracking_no)".formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_created_at ON %sinvoice_api_logs(created_at)".formatted(prefix));
     }
 
     private void execute(String sql) {
