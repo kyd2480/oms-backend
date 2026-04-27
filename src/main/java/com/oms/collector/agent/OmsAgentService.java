@@ -631,6 +631,9 @@ public class OmsAgentService {
             LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
             return new DateRangeRequest(start, end, start.getMonthValue() + "월 출고일 기준");
         }
+        if (containsAny(message, "최근 한달", "최근 1개월", "한달", "한 달", "30일", "최근 30일")) {
+            return new DateRangeRequest(today.minusDays(29), today, "최근 30일 출고일 기준");
+        }
         if (containsAny(message, "이번달", "이번 달", "당월")) {
             LocalDate start = today.withDayOfMonth(1);
             return new DateRangeRequest(start, today, start.getMonthValue() + "월 출고일 기준");
@@ -661,10 +664,13 @@ public class OmsAgentService {
             LocalDate date = today.minusDays(1);
             return new DateRangeRequest(date, date, date + " " + labelPrefix + " 기준");
         }
-        if (message.contains("지난달") || message.contains("전월")) {
+        if (containsAny(message, "지난달", "전월", "저번달", "저번 달")) {
             LocalDate start = today.minusMonths(1).withDayOfMonth(1);
             LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
             return new DateRangeRequest(start, end, start.getMonthValue() + "월 " + labelPrefix + " 기준");
+        }
+        if (containsAny(message, "최근 한달", "최근 1개월", "한달", "한 달", "30일", "최근 30일")) {
+            return new DateRangeRequest(today.minusDays(29), today, "최근 30일 " + labelPrefix + " 기준");
         }
         if (containsAny(message, "이번달", "이번 달", "당월")) {
             LocalDate start = today.withDayOfMonth(1);
