@@ -195,6 +195,7 @@ public class AgentExportService {
             case "get_order_overview" -> "주문 현황 조회";
             case "search_orders" -> "주문 검색";
             case "get_shipment_stats" -> "출고 현황 조회";
+            case "get_claim_overview" -> "반품/교환 현황 조회";
             case "get_inventory_overview" -> "재고 현황 조회";
             case "search_products" -> "상품 검색";
             case "get_top_products_by_channel" -> "판매처 인기 상품 조회";
@@ -215,6 +216,16 @@ public class AgentExportService {
             case "shippedCount" -> "출고 완료 건수";
             case "shippedAt" -> "출고시각";
             case "totalQuantity" -> "상품 수량 합계";
+            case "claimType" -> "클레임 유형";
+            case "totalClaims" -> "클레임 건수";
+            case "requestedClaims" -> "접수 건수";
+            case "inspectingClaims" -> "검수중 건수";
+            case "completedClaims" -> "완료 건수";
+            case "cancelledClaims" -> "취소 건수";
+            case "claims" -> "클레임 목록";
+            case "returnId" -> "반품 ID";
+            case "returnType" -> "반품 유형";
+            case "createdAt" -> "접수시각";
             case "cancelledOrders" -> "취소 주문";
             case "topChannels" -> "주요 판매처";
             case "recentDailyCounts" -> "최근 일자별 주문";

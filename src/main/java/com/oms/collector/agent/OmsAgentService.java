@@ -255,6 +255,23 @@ public class OmsAgentService {
                 """
         ));
         tools.add(functionTool(
+            "get_claim_overview",
+            "반품 또는 교환 접수 현황을 조회한다. claimType은 ALL, RETURN, EXCHANGE 중 하나다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {
+                    "claimType": { "type": "string", "enum": ["ALL", "RETURN", "EXCHANGE"] },
+                    "startDate": { "type": "string" },
+                    "endDate": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                  },
+                  "required": ["claimType", "startDate", "endDate"],
+                  "additionalProperties": false
+                }
+                """
+        ));
+        tools.add(functionTool(
             "get_inventory_overview",
             "재고 총괄 현황, 품절 수량, 위험 상품 목록을 조회한다.",
             """
@@ -318,6 +335,12 @@ public class OmsAgentService {
                 args.has("limit") ? args.path("limit").asInt(10) : 10
             );
             case "get_shipment_stats" -> toolService.getShipmentStats(
+                LocalDate.parse(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString())),
+                LocalDate.parse(args.path("endDate").asText(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString()))),
+                args.has("limit") ? args.path("limit").asInt(10) : 10
+            );
+            case "get_claim_overview" -> toolService.getClaimOverview(
+                args.path("claimType").asText("ALL"),
                 LocalDate.parse(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString())),
                 LocalDate.parse(args.path("endDate").asText(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString()))),
                 args.has("limit") ? args.path("limit").asInt(10) : 10
@@ -425,6 +448,33 @@ public class OmsAgentService {
             return new AgentChatResponse(true, appendActionGuide(formatInvoiceMissingOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
+        ClaimOverviewRequest claimOverviewRequest = parseClaimOverviewRequest(message);
+        if (claimOverviewRequest != null) {
+            Map<String, Object> result = toolService.getClaimOverview(
+                claimOverviewRequest.claimType(),
+                claimOverviewRequest.startDate(),
+                claimOverviewRequest.endDate(),
+                10
+            );
+            toolCalls.add(Map.of(
+                "name", "get_claim_overview",
+                "arguments", Map.of(
+                    "claimType", claimOverviewRequest.claimType(),
+                    "startDate", claimOverviewRequest.startDate().toString(),
+                    "endDate", claimOverviewRequest.endDate().toString(),
+                    "limit", 10
+                )
+            ));
+            return new AgentChatResponse(true, appendActionGuide(formatClaimOverview(result, claimOverviewRequest.label()), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        CancelOverviewRequest cancelOverviewRequest = parseCancelOverviewRequest(message);
+        if (cancelOverviewRequest != null) {
+            Map<String, Object> result = toolService.searchOrders("", "CANCELLED", 50);
+            toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "CANCELLED", "limit", 50)));
+            return new AgentChatResponse(true, appendActionGuide(formatCancelledOrders(result, cancelOverviewRequest.label()), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
         DateRangeRequest shipmentRequest = parseShipmentStatsRequest(message);
         if (shipmentRequest != null) {
             Map<String, Object> result = toolService.getShipmentStats(shipmentRequest.startDate(), shipmentRequest.endDate(), 10);
@@ -506,6 +556,10 @@ public class OmsAgentService {
                 Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
                 return formatShipmentStats(result, "출고일 기준");
             }
+            if ("get_claim_overview".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatClaimOverview(result, "반품/교환 기준");
+            }
             if ("get_inventory_overview".equals(toolName)) {
                 Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
                 return formatInventory(result);
@@ -516,6 +570,33 @@ public class OmsAgentService {
             }
         }
         return "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
+    }
+
+    private ClaimOverviewRequest parseClaimOverviewRequest(String message) {
+        if (!containsAny(message, "반품", "교환")) {
+            return null;
+        }
+        if (!containsAny(message, "알려", "조회", "현황", "사항", "건수", "통계", "요약")) {
+            return null;
+        }
+
+        String claimType = message.contains("교환") ? "EXCHANGE" : "RETURN";
+        DateRangeRequest range = parseRelativeDateRange(message, claimType.equals("EXCHANGE") ? "교환" : "반품");
+        return new ClaimOverviewRequest(claimType, range.startDate(), range.endDate(), range.label());
+    }
+
+    private CancelOverviewRequest parseCancelOverviewRequest(String message) {
+        if (!message.contains("취소")) {
+            return null;
+        }
+        if (containsAny(message, "발송 취소", "발송취소", "배송 취소")) {
+            return null;
+        }
+        if (!containsAny(message, "알려", "조회", "현황", "사항", "건수", "통계", "요약")) {
+            return null;
+        }
+        DateRangeRequest range = parseRelativeDateRange(message, "취소");
+        return new CancelOverviewRequest(range.startDate(), range.endDate(), range.label());
     }
 
     private DateRangeRequest parseShipmentStatsRequest(String message) {
@@ -559,6 +640,40 @@ public class OmsAgentService {
         }
 
         return new DateRangeRequest(today, today, today + " 출고일 기준");
+    }
+
+    private DateRangeRequest parseRelativeDateRange(String message, String labelPrefix) {
+        LocalDate today = LocalDate.now(OMS_ZONE);
+        Matcher matcher = DATE_PATTERN.matcher(message);
+        if (matcher.find()) {
+            LocalDate date = LocalDate.of(
+                Integer.parseInt(matcher.group(1)),
+                Integer.parseInt(matcher.group(2)),
+                Integer.parseInt(matcher.group(3))
+            );
+            return new DateRangeRequest(date, date, date + " " + labelPrefix + " 기준");
+        }
+        if (containsAny(message, "그제", "그저께")) {
+            LocalDate date = today.minusDays(2);
+            return new DateRangeRequest(date, date, date + " " + labelPrefix + " 기준");
+        }
+        if (message.contains("어제")) {
+            LocalDate date = today.minusDays(1);
+            return new DateRangeRequest(date, date, date + " " + labelPrefix + " 기준");
+        }
+        if (message.contains("지난달") || message.contains("전월")) {
+            LocalDate start = today.minusMonths(1).withDayOfMonth(1);
+            LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+            return new DateRangeRequest(start, end, start.getMonthValue() + "월 " + labelPrefix + " 기준");
+        }
+        if (containsAny(message, "이번달", "이번 달", "당월")) {
+            LocalDate start = today.withDayOfMonth(1);
+            return new DateRangeRequest(start, today, start.getMonthValue() + "월 " + labelPrefix + " 기준");
+        }
+        if (containsAny(message, "일주일", "7일", "최근 7일")) {
+            return new DateRangeRequest(today.minusDays(6), today, "최근 7일 " + labelPrefix + " 기준");
+        }
+        return new DateRangeRequest(today, today, today + " " + labelPrefix + " 기준");
     }
 
     @SuppressWarnings("unchecked")
@@ -916,6 +1031,65 @@ public class OmsAgentService {
     }
 
     @SuppressWarnings("unchecked")
+    private String formatClaimOverview(Map<String, Object> result, String label) {
+        List<Map<String, Object>> claims = (List<Map<String, Object>>) result.getOrDefault("claims", List.of());
+        String period = valueOrDash(result.get("startDate")).equals(valueOrDash(result.get("endDate")))
+            ? valueOrDash(result.get("startDate"))
+            : valueOrDash(result.get("startDate")) + " ~ " + valueOrDash(result.get("endDate"));
+
+        String sampleLines = claims.stream()
+            .limit(3)
+            .map(claim -> "- %s / %s / %s".formatted(
+                valueOrDash(claim.get("orderNo")),
+                formatReturnStatus(claim.get("status")),
+                valueOrDash(claim.get("productName"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("- 표시할 접수 건이 없습니다.");
+
+        return """
+            %s 접수 건수는 %s건입니다.
+            - 조회 기간: %s
+            - 접수: %s건 / 검수중: %s건
+            - 완료: %s건 / 취소: %s건
+            %s
+            """.formatted(
+            label,
+            result.getOrDefault("totalClaims", 0),
+            period,
+            result.getOrDefault("requestedClaims", 0),
+            result.getOrDefault("inspectingClaims", 0),
+            result.getOrDefault("completedClaims", 0),
+            result.getOrDefault("cancelledClaims", 0),
+            sampleLines
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private String formatCancelledOrders(Map<String, Object> result, String label) {
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+        if (orders.isEmpty()) {
+            return label + " 주문은 없습니다.";
+        }
+
+        String lines = orders.stream()
+            .sorted(Comparator.comparing(o -> String.valueOf(o.getOrDefault("orderedAt", "")), Comparator.reverseOrder()))
+            .limit(5)
+            .map(o -> "- %s / %s / %s".formatted(
+                valueOrDash(o.get("orderNo")),
+                valueOrDash(o.get("recipientName")),
+                formatDateTime(o.get("orderedAt"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+
+        return """
+            %s 주문은 %s건 확인됩니다.
+            %s
+            """.formatted(label, result.getOrDefault("count", orders.size()), lines);
+    }
+
+    @SuppressWarnings("unchecked")
     private String formatTopProductsByChannel(Map<String, Object> result, ProductRankingRequest request) {
         List<Map<String, Object>> products = (List<Map<String, Object>>) result.getOrDefault("products", List.of());
         if (products.isEmpty()) {
@@ -1007,6 +1181,17 @@ public class OmsAgentService {
         };
     }
 
+    private String formatReturnStatus(Object rawValue) {
+        String value = rawValue != null ? String.valueOf(rawValue).trim().toUpperCase(Locale.ROOT) : "";
+        return switch (value) {
+            case "REQUESTED" -> "접수";
+            case "INSPECTING" -> "검수중";
+            case "COMPLETED" -> "완료";
+            case "CANCELLED" -> "취소";
+            default -> value.isBlank() ? "-" : value;
+        };
+    }
+
     private String valueOrDash(Object rawValue) {
         String value = rawValue != null ? String.valueOf(rawValue).trim() : "";
         return value.isBlank() ? "-" : value;
@@ -1049,6 +1234,19 @@ public class OmsAgentService {
         LocalDate endDate,
         String channelKeyword,
         int limit
+    ) {}
+
+    private record ClaimOverviewRequest(
+        String claimType,
+        LocalDate startDate,
+        LocalDate endDate,
+        String label
+    ) {}
+
+    private record CancelOverviewRequest(
+        LocalDate startDate,
+        LocalDate endDate,
+        String label
     ) {}
 
     private record DateRangeRequest(

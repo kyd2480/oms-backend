@@ -3,8 +3,10 @@ package com.oms.collector.agent;
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.Product;
+import com.oms.collector.entity.ProductReturn;
 import com.oms.collector.repository.OrderRepository;
 import com.oms.collector.repository.ProductRepository;
+import com.oms.collector.repository.ProductReturnRepository;
 import com.oms.collector.service.ProductSearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -31,6 +33,7 @@ public class OmsAgentToolService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
+    private final ProductReturnRepository productReturnRepository;
     private final ProductSearchService productSearchService;
 
     public Map<String, Object> getOrderOverview(String period) {
@@ -219,6 +222,60 @@ public class OmsAgentToolService {
         return result;
     }
 
+    public Map<String, Object> getClaimOverview(String claimType, LocalDate startDate, LocalDate endDate, Integer limit) {
+        int safeLimit = Math.min(Math.max(limit == null ? 10 : limit, 1), 50);
+        LocalDate safeStartDate = startDate != null ? startDate : LocalDate.now(OMS_ZONE);
+        LocalDate safeEndDate = endDate != null ? endDate : safeStartDate;
+        if (safeEndDate.isBefore(safeStartDate)) {
+            LocalDate tmp = safeStartDate;
+            safeStartDate = safeEndDate;
+            safeEndDate = tmp;
+        }
+
+        LocalDateTime start = safeStartDate.atStartOfDay();
+        LocalDateTime end = safeEndDate.atTime(23, 59, 59);
+        String normalizedType = nullable(claimType).trim().toUpperCase(Locale.ROOT);
+
+        List<ProductReturn> claims = productReturnRepository.findByDateRange(start, end).stream()
+            .filter(claim -> switch (normalizedType) {
+                case "EXCHANGE" -> claim.getReturnType() == ProductReturn.ReturnType.EXCHANGE;
+                case "RETURN" -> claim.getReturnType() == ProductReturn.ReturnType.REFUND || claim.getReturnType() == ProductReturn.ReturnType.CANCEL;
+                default -> true;
+            })
+            .toList();
+
+        long requested = claims.stream().filter(claim -> claim.getStatus() == ProductReturn.ReturnStatus.REQUESTED).count();
+        long inspecting = claims.stream().filter(claim -> claim.getStatus() == ProductReturn.ReturnStatus.INSPECTING).count();
+        long completed = claims.stream().filter(claim -> claim.getStatus() == ProductReturn.ReturnStatus.COMPLETED).count();
+        long cancelled = claims.stream().filter(claim -> claim.getStatus() == ProductReturn.ReturnStatus.CANCELLED).count();
+
+        List<Map<String, Object>> items = claims.stream()
+            .limit(safeLimit)
+            .map(claim -> Map.<String, Object>of(
+                "returnId", claim.getReturnId() != null ? claim.getReturnId().toString() : "",
+                "orderNo", nullable(claim.getOrderNo()),
+                "returnType", claim.getReturnType() != null ? claim.getReturnType().name() : "",
+                "status", claim.getStatus() != null ? claim.getStatus().name() : "",
+                "recipientName", nullable(claim.getRecipientName()),
+                "productName", nullable(claim.getProductName()),
+                "createdAt", claim.getCreatedAt() != null ? claim.getCreatedAt().toString() : ""
+            ))
+            .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("zone", OMS_ZONE.getId());
+        result.put("claimType", normalizedType.isBlank() ? "ALL" : normalizedType);
+        result.put("startDate", safeStartDate.toString());
+        result.put("endDate", safeEndDate.toString());
+        result.put("totalClaims", claims.size());
+        result.put("requestedClaims", requested);
+        result.put("inspectingClaims", inspecting);
+        result.put("completedClaims", completed);
+        result.put("cancelledClaims", cancelled);
+        result.put("claims", items);
+        return result;
+    }
+
     public Map<String, Object> getTopProductsByChannel(LocalDate startDate, LocalDate endDate, String channelKeyword, Integer limit) {
         int safeLimit = Math.min(Math.max(limit == null ? 3 : limit, 1), 10);
         LocalDateTime start = startDate.atStartOfDay();
@@ -276,6 +333,12 @@ public class OmsAgentToolService {
                 intArg(args, "limit", 10)
             );
             case "get_shipment_stats" -> getShipmentStats(
+                LocalDate.parse(stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString())),
+                LocalDate.parse(stringArg(args, "endDate", stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString()))),
+                intArg(args, "limit", 10)
+            );
+            case "get_claim_overview" -> getClaimOverview(
+                stringArg(args, "claimType", "ALL"),
                 LocalDate.parse(stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString())),
                 LocalDate.parse(stringArg(args, "endDate", stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString()))),
                 intArg(args, "limit", 10)
