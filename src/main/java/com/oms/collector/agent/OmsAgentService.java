@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Year;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,6 +31,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -39,6 +42,8 @@ public class OmsAgentService {
     private static final String RESPONSES_API = "https://api.openai.com/v1/responses";
     private static final Duration OPENAI_TIMEOUT = Duration.ofSeconds(45);
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
+    private static final Pattern DATE_PATTERN = Pattern.compile("(20\\d{2})[.\\-/년\\s]+(\\d{1,2})[.\\-/월\\s]+(\\d{1,2})");
     private static final String SYSTEM_PROMPT = """
         너는 OMS 운영 도우미다.
         목표는 한국어로 짧고 실무적으로 답하는 것이다.
@@ -79,19 +84,6 @@ public class OmsAgentService {
             return new AgentChatResponse(false, "질문이 비어 있습니다.", model, !blank(apiKey), null, toolCalls, warnings);
         }
 
-        if (blank(apiKey)) {
-            warnings.add("OPENAI_API_KEY가 설정되지 않아 AI 응답 대신 연결 안내만 제공합니다.");
-            return new AgentChatResponse(
-                false,
-                "AI 에이전트 연결 전입니다. 서버 환경변수 `OPENAI_API_KEY`를 설정하면 주문/재고 요약형 질의를 처리할 수 있습니다.",
-                model,
-                false,
-                null,
-                toolCalls,
-                warnings
-            );
-        }
-
         AgentActionProposal proposedAction = agentActionService.propose(request.message(), request.userName());
         if (proposedAction != null) {
             return new AgentChatResponse(
@@ -108,6 +100,19 @@ public class OmsAgentService {
         AgentChatResponse direct = handleDirectQuery(request, warnings, null);
         if (direct != null) {
             return direct;
+        }
+
+        if (blank(apiKey)) {
+            warnings.add("OPENAI_API_KEY가 설정되지 않아 AI 응답 대신 연결 안내만 제공합니다.");
+            return new AgentChatResponse(
+                false,
+                "AI 에이전트 연결 전입니다. 서버 환경변수 `OPENAI_API_KEY`를 설정하면 주문/재고 요약형 질의를 처리할 수 있습니다.",
+                model,
+                false,
+                null,
+                toolCalls,
+                warnings
+            );
         }
 
         HttpClient httpClient = HttpClient.create()
@@ -234,6 +239,22 @@ public class OmsAgentService {
                 """
         ));
         tools.add(functionTool(
+            "get_shipment_stats",
+            "출고일 기준 발송 완료 주문 건수와 수량을 조회한다. 출고일은 SHIPPED 주문의 updatedAt 기준이다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {
+                    "startDate": { "type": "string" },
+                    "endDate": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+                  },
+                  "required": ["startDate", "endDate"],
+                  "additionalProperties": false
+                }
+                """
+        ));
+        tools.add(functionTool(
             "get_inventory_overview",
             "재고 총괄 현황, 품절 수량, 위험 상품 목록을 조회한다.",
             """
@@ -296,14 +317,19 @@ public class OmsAgentService {
                 args.path("status").asText("ALL"),
                 args.has("limit") ? args.path("limit").asInt(10) : 10
             );
+            case "get_shipment_stats" -> toolService.getShipmentStats(
+                LocalDate.parse(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString())),
+                LocalDate.parse(args.path("endDate").asText(args.path("startDate").asText(LocalDate.now(OMS_ZONE).toString()))),
+                args.has("limit") ? args.path("limit").asInt(10) : 10
+            );
             case "get_inventory_overview" -> toolService.getInventoryOverview();
             case "search_products" -> toolService.searchProducts(
                 args.path("keyword").asText(""),
                 args.has("limit") ? args.path("limit").asInt(10) : 10
             );
             case "get_top_products_by_channel" -> toolService.getTopProductsByChannel(
-                LocalDate.parse(args.path("startDate").asText(LocalDate.now().minusDays(29).toString())),
-                LocalDate.parse(args.path("endDate").asText(LocalDate.now().toString())),
+                LocalDate.parse(args.path("startDate").asText(LocalDate.now(OMS_ZONE).minusDays(29).toString())),
+                LocalDate.parse(args.path("endDate").asText(LocalDate.now(OMS_ZONE).toString())),
                 args.path("channelKeyword").asText(""),
                 args.has("limit") ? args.path("limit").asInt(3) : 3
             );
@@ -399,6 +425,20 @@ public class OmsAgentService {
             return new AgentChatResponse(true, appendActionGuide(formatInvoiceMissingOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
+        DateRangeRequest shipmentRequest = parseShipmentStatsRequest(message);
+        if (shipmentRequest != null) {
+            Map<String, Object> result = toolService.getShipmentStats(shipmentRequest.startDate(), shipmentRequest.endDate(), 10);
+            toolCalls.add(Map.of(
+                "name", "get_shipment_stats",
+                "arguments", Map.of(
+                    "startDate", shipmentRequest.startDate().toString(),
+                    "endDate", shipmentRequest.endDate().toString(),
+                    "limit", 10
+                )
+            ));
+            return new AgentChatResponse(true, appendActionGuide(formatShipmentStats(result, shipmentRequest.label()), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
         ProductRankingRequest productRankingRequest = parseProductRankingRequest(message);
         if (productRankingRequest != null) {
             Map<String, Object> result = toolService.getTopProductsByChannel(
@@ -462,6 +502,10 @@ public class OmsAgentService {
                 Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
                 return formatRecentOrders(result);
             }
+            if ("get_shipment_stats".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatShipmentStats(result, "출고일 기준");
+            }
             if ("get_inventory_overview".equals(toolName)) {
                 Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
                 return formatInventory(result);
@@ -472,6 +516,49 @@ public class OmsAgentService {
             }
         }
         return "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
+    }
+
+    private DateRangeRequest parseShipmentStatsRequest(String message) {
+        if (!containsAny(message, "출고", "발송", "배송완료", "발송완료")) {
+            return null;
+        }
+        if (!containsAny(message, "건수", "몇건", "몇 건", "몇개", "몇 개", "조회", "알려", "현황", "통계")) {
+            return null;
+        }
+
+        LocalDate today = LocalDate.now(OMS_ZONE);
+        Matcher matcher = DATE_PATTERN.matcher(message);
+        if (matcher.find()) {
+            LocalDate date = LocalDate.of(
+                Integer.parseInt(matcher.group(1)),
+                Integer.parseInt(matcher.group(2)),
+                Integer.parseInt(matcher.group(3))
+            );
+            return new DateRangeRequest(date, date, date + " 출고일 기준");
+        }
+
+        if (containsAny(message, "그제", "그저께")) {
+            LocalDate date = today.minusDays(2);
+            return new DateRangeRequest(date, date, date + " 출고일 기준");
+        }
+        if (message.contains("어제")) {
+            LocalDate date = today.minusDays(1);
+            return new DateRangeRequest(date, date, date + " 출고일 기준");
+        }
+        if (message.contains("지난달") || message.contains("전월")) {
+            LocalDate start = today.minusMonths(1).withDayOfMonth(1);
+            LocalDate end = start.withDayOfMonth(start.lengthOfMonth());
+            return new DateRangeRequest(start, end, start.getMonthValue() + "월 출고일 기준");
+        }
+        if (containsAny(message, "이번달", "이번 달", "당월")) {
+            LocalDate start = today.withDayOfMonth(1);
+            return new DateRangeRequest(start, today, start.getMonthValue() + "월 출고일 기준");
+        }
+        if (containsAny(message, "일주일", "7일", "최근 7일")) {
+            return new DateRangeRequest(today.minusDays(6), today, "최근 7일 출고일 기준");
+        }
+
+        return new DateRangeRequest(today, today, today + " 출고일 기준");
     }
 
     @SuppressWarnings("unchecked")
@@ -571,7 +658,7 @@ public class OmsAgentService {
             return null;
         }
 
-        LocalDate now = LocalDate.now();
+        LocalDate now = LocalDate.now(OMS_ZONE);
         LocalDate startDate = now.minusDays(29);
         LocalDate endDate = now;
 
@@ -797,6 +884,38 @@ public class OmsAgentService {
     }
 
     @SuppressWarnings("unchecked")
+    private String formatShipmentStats(Map<String, Object> result, String label) {
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+        String period = valueOrDash(result.get("startDate")).equals(valueOrDash(result.get("endDate")))
+            ? valueOrDash(result.get("startDate"))
+            : valueOrDash(result.get("startDate")) + " ~ " + valueOrDash(result.get("endDate"));
+
+        String sampleLines = orders.stream()
+            .limit(3)
+            .map(order -> "- %s / %s / %s".formatted(
+                valueOrDash(order.get("orderNo")),
+                valueOrDash(order.get("recipientName")),
+                formatDateTime(order.get("shippedAt"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("- 표시할 출고 주문이 없습니다.");
+
+        return """
+            %s 출고 완료 건수는 %s건입니다.
+            - 조회 기간: %s
+            - 상품 수량 합계: %s개
+            - 기준: SHIPPED 주문의 수정시각(updatedAt)
+            %s
+            """.formatted(
+            label,
+            result.getOrDefault("shippedCount", 0),
+            period,
+            result.getOrDefault("totalQuantity", 0),
+            sampleLines
+        );
+    }
+
+    @SuppressWarnings("unchecked")
     private String formatTopProductsByChannel(Map<String, Object> result, ProductRankingRequest request) {
         List<Map<String, Object>> products = (List<Map<String, Object>>) result.getOrDefault("products", List.of());
         if (products.isEmpty()) {
@@ -930,5 +1049,11 @@ public class OmsAgentService {
         LocalDate endDate,
         String channelKeyword,
         int limit
+    ) {}
+
+    private record DateRangeRequest(
+        LocalDate startDate,
+        LocalDate endDate,
+        String label
     ) {}
 }

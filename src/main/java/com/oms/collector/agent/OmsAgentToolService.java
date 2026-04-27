@@ -178,6 +178,47 @@ public class OmsAgentToolService {
         );
     }
 
+    public Map<String, Object> getShipmentStats(LocalDate startDate, LocalDate endDate, Integer limit) {
+        int safeLimit = Math.min(Math.max(limit == null ? 10 : limit, 1), 50);
+        LocalDate safeStartDate = startDate != null ? startDate : LocalDate.now(OMS_ZONE);
+        LocalDate safeEndDate = endDate != null ? endDate : safeStartDate;
+        if (safeEndDate.isBefore(safeStartDate)) {
+            LocalDate tmp = safeStartDate;
+            safeStartDate = safeEndDate;
+            safeEndDate = tmp;
+        }
+
+        LocalDateTime start = safeStartDate.atStartOfDay();
+        LocalDateTime end = safeEndDate.atTime(23, 59, 59);
+        List<Order> orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.SHIPPED, start, end);
+
+        int totalQuantity = orders.stream()
+            .flatMap(order -> order.getItems().stream())
+            .mapToInt(item -> item.getQuantity() != null ? item.getQuantity() : 0)
+            .sum();
+
+        List<Map<String, Object>> samples = orders.stream()
+            .limit(safeLimit)
+            .map(o -> Map.<String, Object>of(
+                "orderNo", nullable(o.getOrderNo()),
+                "status", o.getOrderStatus() != null ? o.getOrderStatus().name() : "",
+                "channelName", o.getChannel() != null ? nullable(o.getChannel().getChannelName()) : "",
+                "recipientName", nullable(o.getRecipientName()),
+                "shippedAt", o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : "",
+                "productSummary", summarizeItems(o)
+            ))
+            .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("zone", OMS_ZONE.getId());
+        result.put("startDate", safeStartDate.toString());
+        result.put("endDate", safeEndDate.toString());
+        result.put("shippedCount", orders.size());
+        result.put("totalQuantity", totalQuantity);
+        result.put("orders", samples);
+        return result;
+    }
+
     public Map<String, Object> getTopProductsByChannel(LocalDate startDate, LocalDate endDate, String channelKeyword, Integer limit) {
         int safeLimit = Math.min(Math.max(limit == null ? 3 : limit, 1), 10);
         LocalDateTime start = startDate.atStartOfDay();
@@ -232,6 +273,11 @@ public class OmsAgentToolService {
             case "search_orders" -> searchOrders(
                 stringArg(args, "keyword", ""),
                 stringArg(args, "status", "ALL"),
+                intArg(args, "limit", 10)
+            );
+            case "get_shipment_stats" -> getShipmentStats(
+                LocalDate.parse(stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString())),
+                LocalDate.parse(stringArg(args, "endDate", stringArg(args, "startDate", LocalDate.now(OMS_ZONE).toString()))),
                 intArg(args, "limit", 10)
             );
             case "get_inventory_overview" -> getInventoryOverview();

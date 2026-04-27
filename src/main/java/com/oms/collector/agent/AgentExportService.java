@@ -108,7 +108,7 @@ public class AgentExportService {
         int row = startRow;
         List<String> priorityKeys = List.of(
             "period", "startDate", "endDate", "totalOrders", "pendingOrders", "confirmedOrders",
-            "shippedOrders", "cancelledOrders", "totalProducts", "totalStock", "availableStock",
+            "shippedOrders", "shippedCount", "totalQuantity", "cancelledOrders", "totalProducts", "totalStock", "availableStock",
             "reservedStock", "outOfStockCount", "count", "latestOrderNo", "latestOrderedAt"
         );
 
@@ -194,6 +194,7 @@ public class AgentExportService {
         return switch (name) {
             case "get_order_overview" -> "주문 현황 조회";
             case "search_orders" -> "주문 검색";
+            case "get_shipment_stats" -> "출고 현황 조회";
             case "get_inventory_overview" -> "재고 현황 조회";
             case "search_products" -> "상품 검색";
             case "get_top_products_by_channel" -> "판매처 인기 상품 조회";
@@ -211,6 +212,9 @@ public class AgentExportService {
             case "pendingOrders" -> "대기 주문";
             case "confirmedOrders" -> "확정 주문";
             case "shippedOrders" -> "발송 완료";
+            case "shippedCount" -> "출고 완료 건수";
+            case "shippedAt" -> "출고시각";
+            case "totalQuantity" -> "상품 수량 합계";
             case "cancelledOrders" -> "취소 주문";
             case "topChannels" -> "주요 판매처";
             case "recentDailyCounts" -> "최근 일자별 주문";
