@@ -1,11 +1,13 @@
 package com.oms.collector.controller;
 
 import com.oms.collector.entity.Product;
+import com.oms.collector.entity.CsMemo;
 import com.oms.collector.entity.ProductReturn;
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.SalesChannel;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.CsMemoRepository;
 import com.oms.collector.repository.ProductReturnRepository;
 import com.oms.collector.service.InventoryService;
 import com.oms.collector.service.OrderSequenceService;
@@ -44,6 +46,7 @@ public class ReturnController {
     private final InventoryService  inventoryService;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
+    private final CsMemoRepository csMemoRepository;
     private final SalesChannelRepository salesChannelRepository;
     private final OrderSequenceService orderSequenceService;
 
@@ -267,6 +270,16 @@ public class ReturnController {
             }
         }
 
+        createAutoCsMemo(
+            ret.getOrderNo(),
+            "04.반품요청",
+            "고객문의",
+            ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "교환" : "반품",
+            buildCreateMemoContent(ret, req.items),
+            "처리중",
+            extractWorkerName(req.items)
+        );
+
         return ResponseEntity.ok(new ReturnDTO(ret));
     }
 
@@ -415,9 +428,21 @@ public class ReturnController {
             log.warn("stockedItems 직렬화 실패: {}", ex.getMessage());
         }
 
-        // 불량 하나라도 → INSPECTING(환불/교환 대기), 전체 정상 → COMPLETED
+        // 교환은 입고 시 신규 주문 자동 생성
+        if (ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE
+            && (ret.getExchangeOrderNo() == null || ret.getExchangeOrderNo().isBlank())) {
+            String exchangeOrderNo = createExchangeOrderIfNeeded(ret, null);
+            ret.setExchangeOrderNo(exchangeOrderNo);
+            ret.setResolutionType(ProductReturn.ResolutionType.EXCHANGE);
+            ret.setResolutionMemo(req.inspectMemo);
+        }
+
+        // 불량 하나라도 → INSPECTING(환불 대기), 전체 정상 → COMPLETED
         boolean hasDefective = items.stream().anyMatch(it -> "DEFECTIVE".equals(it.itemResult));
-        if (hasDefective) {
+        if (ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE) {
+            ret.setStatus(ProductReturn.ReturnStatus.COMPLETED);
+            ret.setCompletedAt(LocalDateTime.now());
+        } else if (hasDefective) {
             ret.setStatus(ProductReturn.ReturnStatus.INSPECTING);
         } else {
             ret.setStatus(ProductReturn.ReturnStatus.COMPLETED);
@@ -425,6 +450,15 @@ public class ReturnController {
         }
 
         returnRepository.save(ret);
+        createAutoCsMemo(
+            ret.getOrderNo(),
+            "04.반품요청",
+            "내부처리",
+            ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "교환" : "반품",
+            buildInspectMemoContent(ret, req, stockMsgs),
+            ret.getStatus() == ProductReturn.ReturnStatus.COMPLETED ? "완료" : "처리중",
+            "시스템"
+        );
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("success", true);
@@ -457,8 +491,18 @@ public class ReturnController {
 
         ret.setStatus(ProductReturn.ReturnStatus.COMPLETED);
         ret.setCompletedAt(LocalDateTime.now());
+        ProductReturn saved = returnRepository.save(ret);
+        createAutoCsMemo(
+            ret.getOrderNo(),
+            "04.반품요청",
+            "내부처리",
+            ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "교환" : "반품",
+            buildResolveMemoContent(ret),
+            "완료",
+            "시스템"
+        );
 
-        return ResponseEntity.ok(new ReturnDTO(returnRepository.save(ret)));
+        return ResponseEntity.ok(new ReturnDTO(saved));
     }
 
     private String createExchangeOrderIfNeeded(ProductReturn ret, String requestedExchangeOrderNo) {
@@ -542,9 +586,19 @@ public class ReturnController {
         List<OrderItem> built = new ArrayList<>();
 
         for (Map<String, Object> requested : requestItems) {
-            String productCode = asString(requested.get("productCode"));
-            String productName = asString(requested.get("productName"));
-            String optionName = asString(requested.get("optionName"));
+            String productCode = firstNonBlank(
+                asString(requested.get("replacementProductCode")),
+                asString(requested.get("replacementBarcode")),
+                asString(requested.get("productCode"))
+            );
+            String productName = firstNonBlank(
+                asString(requested.get("replacementProductName")),
+                asString(requested.get("productName"))
+            );
+            String optionName = firstNonBlank(
+                asString(requested.get("replacementOptionName")),
+                asString(requested.get("optionName"))
+            );
             int quantity = requested.get("quantity") instanceof Number
                 ? ((Number) requested.get("quantity")).intValue()
                 : 1;
@@ -560,10 +614,10 @@ public class ReturnController {
 
             OrderItem newItem = OrderItem.builder()
                 .order(newOrder)
-                .productCode(sourceItem != null ? sourceItem.getProductCode() : productCode)
-                .channelProductCode(sourceItem != null ? sourceItem.getChannelProductCode() : productCode)
-                .productName(sourceItem != null ? sourceItem.getProductName() : defaultString(productName, ret.getProductName(), "교환상품"))
-                .optionName(sourceItem != null ? sourceItem.getOptionName() : optionName)
+                .productCode(productCode)
+                .channelProductCode(productCode)
+                .productName(defaultString(productName, sourceItem != null ? sourceItem.getProductName() : null, ret.getProductName(), "교환상품"))
+                .optionName(optionName)
                 .quantity(quantity)
                 .unitPrice(unitPrice)
                 .totalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)))
@@ -648,6 +702,139 @@ public class ReturnController {
         return fallback;
     }
 
+    private String defaultString(String first, String second, String third, String fallback) {
+        if (first != null && !first.isBlank()) return first;
+        if (second != null && !second.isBlank()) return second;
+        if (third != null && !third.isBlank()) return third;
+        return fallback;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private void createAutoCsMemo(
+        String orderNo,
+        String csType,
+        String csDept,
+        String csKind,
+        String content,
+        String status,
+        String writer
+    ) {
+        if (orderNo == null || orderNo.isBlank() || content == null || content.isBlank()) {
+            return;
+        }
+        csMemoRepository.save(CsMemo.builder()
+            .orderNo(orderNo)
+            .csType(csType)
+            .csDept(csDept)
+            .csKind(csKind)
+            .content(content)
+            .status(status)
+            .writer(writer != null && !writer.isBlank() ? writer : "시스템")
+            .build());
+    }
+
+    private String extractWorkerName(List<Map<String, Object>> items) {
+        if (items == null) {
+            return "시스템";
+        }
+        for (Map<String, Object> item : items) {
+            String workerId = asString(item.get("workerId"));
+            if (!workerId.isBlank()) {
+                return workerId;
+            }
+        }
+        return "시스템";
+    }
+
+    private String buildCreateMemoContent(ProductReturn ret, List<Map<String, Object>> items) {
+        List<String> lines = new ArrayList<>();
+        lines.add(ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "[교환 접수]" : "[반품 접수]");
+        if (ret.getReturnTrackingNo() != null && !ret.getReturnTrackingNo().isBlank()) {
+            lines.add("반송장번호: " + ret.getReturnTrackingNo());
+        }
+        if (ret.getCarrierName() != null && !ret.getCarrierName().isBlank()) {
+            lines.add("택배사: " + ret.getCarrierName());
+        }
+        if (ret.getReturnReason() != null && !ret.getReturnReason().isBlank()) {
+            lines.add("사유: " + ret.getReturnReason());
+        }
+        if (items != null && !items.isEmpty()) {
+            lines.add("대상상품:");
+            for (Map<String, Object> item : items) {
+                String productName = asString(item.get("productName"));
+                String optionName = asString(item.get("optionName"));
+                String replacementProductName = asString(item.get("replacementProductName"));
+                String replacementOptionName = asString(item.get("replacementOptionName"));
+                int quantity = item.get("quantity") instanceof Number ? ((Number) item.get("quantity")).intValue() : 1;
+                String line = "- " + productName
+                    + (optionName.isBlank() ? "" : " / " + optionName)
+                    + " x " + quantity;
+                if (ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE && !replacementProductName.isBlank()) {
+                    line += " -> " + replacementProductName
+                        + (replacementOptionName.isBlank() ? "" : " / " + replacementOptionName);
+                }
+                lines.add(line);
+            }
+        }
+        return String.join("\n", lines);
+    }
+
+    private String buildInspectMemoContent(ProductReturn ret, InspectRequest req, List<String> stockMsgs) {
+        List<String> lines = new ArrayList<>();
+        lines.add(ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "[교환 입고 처리]" : "[반품 입고 처리]");
+        if (req.inspectResult != null && !req.inspectResult.isBlank()) {
+            lines.add("검수결과: " + req.inspectResult);
+        }
+        if (stockMsgs != null && !stockMsgs.isEmpty()) {
+            lines.add("재고처리: " + String.join(", ", stockMsgs));
+        }
+        if (ret.getExchangeOrderNo() != null && !ret.getExchangeOrderNo().isBlank()) {
+            lines.add("생성주문번호: " + ret.getExchangeOrderNo());
+        }
+        if (req.inspectMemo != null && !req.inspectMemo.isBlank()) {
+            lines.add("메모: " + req.inspectMemo);
+        }
+        return String.join("\n", lines);
+    }
+
+    private String buildResolveMemoContent(ProductReturn ret) {
+        List<String> lines = new ArrayList<>();
+        lines.add(ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "[교환 처리 완료]" : "[반품 처리 완료]");
+        if (ret.getResolutionType() != null) {
+            lines.add("처리유형: " + ret.getResolutionType().name());
+        }
+        if (ret.getRefundAmount() != null) {
+            lines.add("환불금액: " + ret.getRefundAmount());
+        }
+        if (ret.getExchangeOrderNo() != null && !ret.getExchangeOrderNo().isBlank()) {
+            lines.add("교환주문번호: " + ret.getExchangeOrderNo());
+        }
+        if (ret.getResolutionMemo() != null && !ret.getResolutionMemo().isBlank()) {
+            lines.add("메모: " + ret.getResolutionMemo());
+        }
+        return String.join("\n", lines);
+    }
+
+    private String buildCancelMemoContent(ProductReturn ret, List<String> rollbackMsgs) {
+        List<String> lines = new ArrayList<>();
+        lines.add(ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "[교환 취소]" : "[반품 취소]");
+        if (rollbackMsgs != null && !rollbackMsgs.isEmpty()) {
+            lines.add("차감처리: " + String.join(", ", rollbackMsgs));
+        }
+        return String.join("\n", lines);
+    }
+
     /* ── 반품 취소 ────────────────────────────────────── */
 
     @PutMapping("/{id}/cancel")
@@ -701,6 +888,15 @@ public class ReturnController {
 
         ret.setStatus(ProductReturn.ReturnStatus.CANCELLED);
         returnRepository.save(ret);
+        createAutoCsMemo(
+            ret.getOrderNo(),
+            "04.반품요청",
+            "내부처리",
+            ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE ? "교환" : "반품",
+            buildCancelMemoContent(ret, rollbackMsgs),
+            "완료",
+            "시스템"
+        );
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("success", true);
