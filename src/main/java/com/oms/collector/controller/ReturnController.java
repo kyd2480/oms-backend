@@ -270,6 +270,14 @@ public class ReturnController {
             }
         }
 
+        if (ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE
+            && (ret.getExchangeOrderNo() == null || ret.getExchangeOrderNo().isBlank())) {
+            String exchangeOrderNo = createExchangeOrderIfNeeded(ret, null);
+            ret.setExchangeOrderNo(exchangeOrderNo);
+            ret.setResolutionType(ProductReturn.ResolutionType.EXCHANGE);
+            returnRepository.save(ret);
+        }
+
         createAutoCsMemo(
             ret.getOrderNo(),
             "04.반품요청",
@@ -768,6 +776,11 @@ public class ReturnController {
         }
         if (ret.getReturnReason() != null && !ret.getReturnReason().isBlank()) {
             lines.add("사유: " + ret.getReturnReason());
+        }
+        if (ret.getReturnType() == ProductReturn.ReturnType.EXCHANGE
+            && ret.getExchangeOrderNo() != null
+            && !ret.getExchangeOrderNo().isBlank()) {
+            lines.add("생성주문번호: " + ret.getExchangeOrderNo());
         }
         if (items != null && !items.isEmpty()) {
             lines.add("대상상품:");
