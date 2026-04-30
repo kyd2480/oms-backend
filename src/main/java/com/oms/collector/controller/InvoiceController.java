@@ -910,6 +910,7 @@ public class InvoiceController {
         }
 
         order.setOrderStatus(Order.OrderStatus.CONFIRMED);
+        order.setInspectionCompleted(false);
         orderRepository.save(order);
         log.info("발송취소 완료: {} → CONFIRMED (재고복구 {}건)", orderNo, restored);
 
@@ -937,6 +938,7 @@ public class InvoiceController {
 
             cancelCarrierInvoiceIfNeeded(order);
             order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
+            order.setInspectionCompleted(false);
             orderRepository.save(order);
             log.info("송장삭제: {}", orderNo);
             return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));

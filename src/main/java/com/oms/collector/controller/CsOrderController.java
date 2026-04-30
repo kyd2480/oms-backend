@@ -53,6 +53,7 @@ public class CsOrderController {
         public String  carrierCode;
         public String  carrierName;
         public String  trackingNo;
+        public Boolean inspectionCompleted;
         public Boolean shippingHold;
         public String  holdReason;
         public Boolean priorityAllocation;
@@ -381,6 +382,7 @@ public class CsOrderController {
         dto.orderedAt      = o.getOrderedAt() != null ? o.getOrderedAt().toString() : null;
         dto.shippedAt      = o.getUpdatedAt() != null ? o.getUpdatedAt().toString() : null;
         dto.shippingHold = Boolean.TRUE.equals(o.getShippingHold());
+        dto.inspectionCompleted = Boolean.TRUE.equals(o.getInspectionCompleted());
         dto.holdReason = o.getHoldReason();
         dto.priorityAllocation = Boolean.TRUE.equals(o.getPriorityAllocation());
         dto.allocationExcluded = Boolean.TRUE.equals(o.getAllocationExcluded());

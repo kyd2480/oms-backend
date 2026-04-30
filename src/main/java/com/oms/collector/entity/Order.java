@@ -140,6 +140,10 @@ public class Order {
 
     @Column(name = "split_from_order_no", length = 100)
     private String splitFromOrderNo;
+
+    @Column(name = "inspection_completed", nullable = false)
+    @Builder.Default
+    private Boolean inspectionCompleted = false;
     
     // 날짜
     @Column(name = "ordered_at", nullable = false)

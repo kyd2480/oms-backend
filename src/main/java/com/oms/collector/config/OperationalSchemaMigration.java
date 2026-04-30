@@ -73,6 +73,11 @@ public class OperationalSchemaMigration {
 
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS merged_into_order_no VARCHAR(100)");
         execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS split_from_order_no VARCHAR(100)");
+
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS inspection_completed BOOLEAN");
+        execute("ALTER TABLE orders ALTER COLUMN inspection_completed SET DEFAULT FALSE");
+        execute("UPDATE orders SET inspection_completed = FALSE WHERE inspection_completed IS NULL");
+        execute("ALTER TABLE orders ALTER COLUMN inspection_completed SET NOT NULL");
     }
 
     private void migrateOrderItems() {

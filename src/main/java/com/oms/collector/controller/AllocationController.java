@@ -207,6 +207,7 @@ public class AllocationController {
         }
 
         order.setOrderStatus(Order.OrderStatus.SHIPPED);
+        order.setInspectionCompleted(true);
         orderRepository.save(order);
 
         MarketShipmentSyncService.MarketShipmentSyncResult syncResult = marketShipmentSyncService.syncShipment(
@@ -252,6 +253,7 @@ public class AllocationController {
         }
 
         order.setOrderStatus(Order.OrderStatus.PENDING);
+        order.setInspectionCompleted(false);
         orderRepository.save(order);
 
         return ResponseEntity.ok(Map.of("success", true, "message", "할당 취소 완료"));
