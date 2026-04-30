@@ -333,8 +333,17 @@ public class CsOrderController {
             split.setSplitFromOrderNo(source.getOrderNo());
             orderRepository.saveAndFlush(split);
 
-            // 2. JPQL UPDATE로 order_id FK 직접 변경 — orphanRemoval 충돌 없음
-            orderItemRepository.moveItemsToOrder(split, selectedIds);
+            // 2. 선택한 상품을 split 주문으로 직접 이동
+            List<OrderItem> movingItems = orderItemRepository.findAllById(selectedIds).stream()
+                .filter(item -> item.getOrder() != null && source.getOrderId().equals(item.getOrder().getOrderId()))
+                .collect(Collectors.toList());
+            if (movingItems.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", "이동할 상품을 찾지 못했습니다."));
+            }
+            for (OrderItem item : movingItems) {
+                item.setOrder(split);
+            }
+            orderItemRepository.saveAll(movingItems);
 
             // 3. 양쪽 주문 재조회 후 금액 재계산
             Order freshSource = getOrder(orderNo);

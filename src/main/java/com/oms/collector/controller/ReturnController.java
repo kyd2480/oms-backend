@@ -7,6 +7,7 @@ import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
 import com.oms.collector.entity.SalesChannel;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.OrderItemRepository;
 import com.oms.collector.repository.CsMemoRepository;
 import com.oms.collector.repository.ProductReturnRepository;
 import com.oms.collector.service.InventoryService;
@@ -46,6 +47,7 @@ public class ReturnController {
     private final InventoryService  inventoryService;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
+    private final OrderItemRepository orderItemRepository;
     private final CsMemoRepository csMemoRepository;
     private final SalesChannelRepository salesChannelRepository;
     private final OrderSequenceService orderSequenceService;
@@ -548,6 +550,8 @@ public class ReturnController {
             .paidAt(LocalDateTime.now())
             .build();
 
+        orderRepository.saveAndFlush(newOrder);
+
         List<OrderItem> newItems = buildExchangeItems(ret, sourceOrder, newOrder);
         if (newItems.isEmpty()) {
             newItems.add(OrderItem.builder()
@@ -557,12 +561,15 @@ public class ReturnController {
                 .productName(ret.getProductName() != null ? ret.getProductName() : "교환상품")
                 .optionName("")
                 .quantity(ret.getQuantity() != null ? ret.getQuantity() : 1)
+                .cancelledQuantity(0)
+                .itemStatus(OrderItem.ItemStatus.ACTIVE)
                 .unitPrice(BigDecimal.ZERO)
                 .totalPrice(BigDecimal.ZERO)
                 .build());
         }
 
         newItems.forEach(newOrder::addItem);
+        orderItemRepository.saveAll(newItems);
         BigDecimal total = newItems.stream()
             .map(item -> item.getTotalPrice() != null ? item.getTotalPrice() : BigDecimal.ZERO)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -627,6 +634,8 @@ public class ReturnController {
                 .productName(defaultString(productName, sourceItem != null ? sourceItem.getProductName() : null, ret.getProductName(), "교환상품"))
                 .optionName(optionName)
                 .quantity(quantity)
+                .cancelledQuantity(0)
+                .itemStatus(OrderItem.ItemStatus.ACTIVE)
                 .unitPrice(unitPrice)
                 .totalPrice(unitPrice.multiply(BigDecimal.valueOf(quantity)))
                 .build();
@@ -643,6 +652,8 @@ public class ReturnController {
                     .productName(sourceItem.getProductName())
                     .optionName(sourceItem.getOptionName())
                     .quantity(quantity)
+                    .cancelledQuantity(0)
+                    .itemStatus(OrderItem.ItemStatus.ACTIVE)
                     .unitPrice(sourceItem.getUnitPrice() != null ? sourceItem.getUnitPrice() : BigDecimal.ZERO)
                     .totalPrice(sourceItem.getTotalPrice() != null ? sourceItem.getTotalPrice() : BigDecimal.ZERO)
                     .build());
