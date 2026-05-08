@@ -804,6 +804,8 @@ public class InvoiceController {
     @GetMapping("/shipped")
     @Transactional(readOnly = true)
     public ResponseEntity<List<InvoiceOrderDTO>> getShipped(
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "200") int size,
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate
     ) {
@@ -813,12 +815,8 @@ public class InvoiceController {
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
             orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.SHIPPED, start, end);
         } else {
-            orders = new ArrayList<>();
-            int p = 0; while(true) {
-                var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "orderedAt"));
-                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.SHIPPED, pg);
-                orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
-            }
+            var pg = PageRequest.of(Math.max(page, 0), Math.max(size, 1), Sort.by(Sort.Direction.DESC, "updatedAt"));
+            orders = orderRepository.findByOrderStatus(Order.OrderStatus.SHIPPED, pg).getContent();
         }
 
         orders.forEach(o -> {
