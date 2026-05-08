@@ -3,6 +3,7 @@ package com.oms.collector.repository;
 import com.oms.collector.entity.Product;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -73,4 +74,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
            "AND p.isActive = true " +
            "ORDER BY p.productName ASC")
     List<Product> searchProducts(String keyword);
+
+    @Query("SELECT p FROM Product p WHERE LOWER(p.sku) IN :codes OR LOWER(p.barcode) IN :codes")
+    List<Product> findBySkuOrBarcodeInLowercase(@Param("codes") List<String> codes);
 }

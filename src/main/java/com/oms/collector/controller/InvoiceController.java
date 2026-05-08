@@ -439,7 +439,7 @@ public class InvoiceController {
         }
         order.getItems().size();
         if (order.getChannel() != null) order.getChannel().getChannelName();
-        Map<String, Product> productMap = getInvoiceProductMap();
+        Map<String, Product> productMap = getInvoiceProductMap(order);
         String fullSenderAddress = buildSenderAddress();
         return ResponseEntity.ok(toInvoiceOrderDTO(order, productMap, fullSenderAddress));
     }
@@ -964,6 +964,33 @@ public class InvoiceController {
         return productMap;
     }
 
+    private Map<String, Product> getInvoiceProductMap(Order order) {
+        if (order == null || order.getItems() == null || order.getItems().isEmpty()) {
+            return Map.of();
+        }
+        Set<String> codes = order.getItems().stream()
+            .map(OrderItem::getProductCode)
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(code -> !code.isBlank())
+            .map(String::toLowerCase)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Product> productMap = new HashMap<>();
+        for (Product product : productRepository.findBySkuOrBarcodeInLowercase(new ArrayList<>(codes))) {
+            if (product.getSku() != null && !product.getSku().isBlank()) {
+                productMap.put(product.getSku().toLowerCase(), product);
+            }
+            if (product.getBarcode() != null && !product.getBarcode().isBlank()) {
+                productMap.put(product.getBarcode().toLowerCase(), product);
+            }
+        }
+        return productMap;
+    }
+
     private String buildSenderAddress() {
         String address = Objects.toString(senderAddress, "").trim();
         String detail = Objects.toString(senderAddressDetail, "").trim();
@@ -1015,15 +1042,24 @@ public class InvoiceController {
     }
 
     private InvoiceOrderDTO toInvoiceOrderDTO(Order order, Map<String, Product> productMap, String fullSenderAddress) {
-        DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo =
-            deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
         InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
-        if (invoiceInfo != null && (
+        boolean hasEmbeddedDeliveryArea = invoiceInfo != null && (
             hasText(invoiceInfo.deliveryAreaCode())
                 || hasText(invoiceInfo.arrivalCenterName())
                 || hasText(invoiceInfo.deliveryPostOfficeName())
                 || hasText(invoiceInfo.deliveryCourseNo())
-        )) {
+        );
+
+        DeliveryAreaCodeService.DeliveryAreaInfo deliveryAreaInfo = hasEmbeddedDeliveryArea
+            ? new DeliveryAreaCodeService.DeliveryAreaInfo(
+                valueOrDefault(invoiceInfo.deliveryAreaCode(), ""),
+                valueOrDefault(invoiceInfo.arrivalCenterName(), ""),
+                valueOrDefault(invoiceInfo.deliveryPostOfficeName(), ""),
+                valueOrDefault(invoiceInfo.deliveryCourseNo(), "")
+            )
+            : deliveryAreaCodeService.lookup(order.getPostalCode(), buildRecipientAddress(order));
+
+        if (hasEmbeddedDeliveryArea) {
             deliveryAreaInfo = new DeliveryAreaCodeService.DeliveryAreaInfo(
                 valueOrDefault(invoiceInfo.deliveryAreaCode(), deliveryAreaInfo.deliveryAreaCode()),
                 valueOrDefault(invoiceInfo.arrivalCenterName(), deliveryAreaInfo.arrivalCenterName()),
