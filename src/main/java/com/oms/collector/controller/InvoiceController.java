@@ -266,6 +266,31 @@ public class InvoiceController {
         }
     }
 
+    public static class InspectScanOrderDTO {
+        public String orderNo;
+        public String recipientName;
+        public String recipientPhone;
+        public String address;
+        public String carrierName;
+        public String trackingNo;
+        public List<OrderItemDTO> items;
+
+        public InspectScanOrderDTO(Order order) {
+            this.orderNo = order.getOrderNo();
+            this.recipientName = order.getRecipientName();
+            this.recipientPhone = order.getRecipientPhone();
+            this.address = (order.getAddress() != null ? order.getAddress() : "")
+                + (order.getAddressDetail() != null ? " " + order.getAddressDetail() : "");
+            InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+            this.carrierName = invoiceInfo != null ? Objects.toString(invoiceInfo.carrierName(), "") : "";
+            this.trackingNo = invoiceInfo != null ? Objects.toString(invoiceInfo.trackingNo(), "") : "";
+            this.items = order.getItems().stream()
+                .filter(i -> i.getActiveQuantity() > 0)
+                .map(i -> new OrderItemDTO(i, ""))
+                .collect(Collectors.toList());
+        }
+    }
+
     private static String extractInvoiceSegment(String memo) {
         if (memo == null || memo.isBlank()) {
             return null;
@@ -442,6 +467,30 @@ public class InvoiceController {
         Map<String, Product> productMap = getInvoiceProductMap(order);
         String fullSenderAddress = buildSenderAddress();
         return ResponseEntity.ok(toInvoiceOrderDTO(order, productMap, fullSenderAddress));
+    }
+
+    @GetMapping("/scan-find")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> findOrderForInspectScan(@RequestParam String q) {
+        if (q == null || q.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "검색어를 입력하세요"));
+        }
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
+
+        Order order = orderRepository.findWithItemsByOrderNo(q).orElse(null);
+        if (order == null || !statuses.contains(order.getOrderStatus())) {
+            order = orderRepository.findByTrackingNoInMemo(statuses, q).orElse(null);
+        }
+        if (order == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("message", "주문을 찾을 수 없습니다: " + q));
+        }
+        if (order.getDeliveryMemo() == null || !order.getDeliveryMemo().contains(INVOICE_PREFIX)) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(Map.of("message", "송장번호가 없는 주문입니다: " + q));
+        }
+        order.getItems().size();
+        return ResponseEntity.ok(new InspectScanOrderDTO(order));
     }
 
     /**
