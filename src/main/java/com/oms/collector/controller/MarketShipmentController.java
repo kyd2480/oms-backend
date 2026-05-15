@@ -41,6 +41,8 @@ public class MarketShipmentController {
     ) {
         public static MarketShipmentDto from(Order order) {
             InvoiceInfo invoice = extractInvoiceInfo(order.getDeliveryMemo());
+            String marketSyncStatus = resolveEffectiveMarketSyncStatus(order, invoice);
+            String marketSyncMessage = resolveEffectiveMarketSyncMessage(order, invoice, marketSyncStatus);
             return new MarketShipmentDto(
                 order.getOrderNo(),
                 order.getChannel() != null ? order.getChannel().getChannelCode() : "",
@@ -49,8 +51,8 @@ public class MarketShipmentController {
                 order.getRecipientName(),
                 invoice != null ? invoice.carrierName() : "",
                 invoice != null ? invoice.trackingNo() : "",
-                order.getMarketSyncStatus() != null ? order.getMarketSyncStatus().name() : "",
-                order.getMarketSyncMessage(),
+                marketSyncStatus,
+                marketSyncMessage,
                 formatDateTime(order.getUpdatedAt()),
                 formatDateTime(order.getMarketSyncAttemptedAt()),
                 formatDateTime(order.getMarketSyncedAt())
@@ -73,9 +75,8 @@ public class MarketShipmentController {
         });
 
         List<MarketShipmentDto> result = shipped.stream()
-            .filter(order -> order.getMarketSyncStatus() != null)
-            .filter(order -> wanted.contains(order.getMarketSyncStatus().name()))
             .map(MarketShipmentDto::from)
+            .filter(dto -> wanted.contains(dto.marketSyncStatus()))
             .collect(Collectors.toList());
 
         return ResponseEntity.ok(result);
@@ -148,6 +149,46 @@ public class MarketShipmentController {
 
     private static String formatDateTime(LocalDateTime value) {
         return value != null ? value.toString() : "";
+    }
+
+    private static String resolveEffectiveMarketSyncStatus(Order order, InvoiceInfo invoice) {
+        if (order.getMarketSyncStatus() == Order.MarketSyncStatus.SUCCESS) {
+            return Order.MarketSyncStatus.SUCCESS.name();
+        }
+        if (order.getMarketSyncStatus() == Order.MarketSyncStatus.FAILED) {
+            return Order.MarketSyncStatus.FAILED.name();
+        }
+
+        boolean hasChannel = order.getChannel() != null
+            && order.getChannel().getChannelCode() != null
+            && !order.getChannel().getChannelCode().isBlank();
+        boolean hasChannelOrderNo = order.getChannelOrderNo() != null && !order.getChannelOrderNo().isBlank();
+        boolean hasTracking = invoice != null && invoice.trackingNo() != null && !invoice.trackingNo().isBlank();
+
+        if (hasChannel && hasChannelOrderNo && hasTracking) {
+            return Order.MarketSyncStatus.PENDING.name();
+        }
+        return Order.MarketSyncStatus.NOT_REQUIRED.name();
+    }
+
+    private static String resolveEffectiveMarketSyncMessage(Order order, InvoiceInfo invoice, String effectiveStatus) {
+        if (Order.MarketSyncStatus.SUCCESS.name().equals(effectiveStatus)
+            || Order.MarketSyncStatus.FAILED.name().equals(effectiveStatus)) {
+            return order.getMarketSyncMessage();
+        }
+        if (Order.MarketSyncStatus.PENDING.name().equals(effectiveStatus)) {
+            return "검수발송 완료, 판매처 발송완료 API 전송 대기";
+        }
+        if (order.getChannel() == null || order.getChannel().getChannelCode() == null || order.getChannel().getChannelCode().isBlank()) {
+            return "판매처 정보가 없는 주문";
+        }
+        if (order.getChannelOrderNo() == null || order.getChannelOrderNo().isBlank()) {
+            return "판매처 주문번호(channelOrderNo) 없음";
+        }
+        if (invoice == null || invoice.trackingNo() == null || invoice.trackingNo().isBlank()) {
+            return "송장정보 없음";
+        }
+        return order.getMarketSyncMessage();
     }
 
     private static InvoiceInfo extractInvoiceInfo(String memo) {
