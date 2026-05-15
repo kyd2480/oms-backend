@@ -49,8 +49,8 @@ public class OmsAgentService {
         목표는 한국어로 짧고 실무적으로 답하는 것이다.
         반드시 현재 OMS 도구로 확인한 사실만 단정적으로 말해라.
         데이터가 부족하면 추정이라고 명시해라.
-        허용 범위는 조회, 요약, 분석, 우선순위 제안이다.
-        실행형 작업 요청이 와도 직접 실행하지 말고, 어떤 작업이 가능한지와 확인이 필요하다는 점만 설명해라.
+        일상적인 인사나 간단한 대화에는 자연스럽게 짧게 답해도 된다.
+        실행형 작업 요청은 직접 단정 실행하지 말고, 실행 제안과 승인 필요 여부를 분명히 설명해라.
         raw json, key=value 나열, 내부 파라미터명(keyword, status, limit 등) 출력은 금지한다.
         답변은 최대 6줄 안쪽으로 작성해라.
         답변 형식:
@@ -314,6 +314,21 @@ public class OmsAgentService {
                 }
                 """
         ));
+        tools.add(functionTool(
+            "search_orders_by_print_type",
+            "인쇄구분명 또는 인쇄구분코드 기준으로 주문 목록을 조회한다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {
+                    "printTypeKeyword": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+                  },
+                  "required": ["printTypeKeyword"],
+                  "additionalProperties": false
+                }
+                """
+        ));
         return tools;
     }
 
@@ -355,6 +370,10 @@ public class OmsAgentService {
                 LocalDate.parse(args.path("endDate").asText(LocalDate.now(OMS_ZONE).toString())),
                 args.path("channelKeyword").asText(""),
                 args.has("limit") ? args.path("limit").asInt(3) : 3
+            );
+            case "search_orders_by_print_type" -> toolService.searchOrdersByPrintType(
+                args.path("printTypeKeyword").asText(""),
+                args.has("limit") ? args.path("limit").asInt(10) : 10
             );
             default -> {
                 Map<String, Object> error = new LinkedHashMap<>();
@@ -436,6 +455,14 @@ public class OmsAgentService {
         String message = request.message() != null ? request.message().toLowerCase(Locale.ROOT) : "";
         List<Map<String, Object>> toolCalls = new ArrayList<>();
 
+        if (isGreetingMessage(message)) {
+            return new AgentChatResponse(true, buildGreetingReply(request.message()), model, !blank(apiKey), proposedAction, toolCalls, warnings);
+        }
+
+        if (containsAny(message, "무슨 작업", "뭐 할 수", "어떤 작업", "가능한 작업", "도움말", "사용법")) {
+            return new AgentChatResponse(true, buildCapabilityReply(), model, !blank(apiKey), proposedAction, toolCalls, warnings);
+        }
+
         if (containsAny(message, "최근 주문", "최근 주문건", "최근 주문 보여", "latest orders")) {
             Map<String, Object> result = toolService.searchOrders("", "ALL", 10);
             toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "ALL", "limit", 10)));
@@ -508,6 +535,25 @@ public class OmsAgentService {
             return new AgentChatResponse(true, formatTopProductsByChannel(result, productRankingRequest), model, true, proposedAction, toolCalls, warnings);
         }
 
+        String printTypeKeyword = extractPrintTypeKeyword(message);
+        if (printTypeKeyword != null) {
+            Map<String, Object> result = toolService.searchOrdersByPrintType(printTypeKeyword, 20);
+            toolCalls.add(Map.of("name", "search_orders_by_print_type", "arguments", Map.of("printTypeKeyword", printTypeKeyword, "limit", 20)));
+            return new AgentChatResponse(true, formatPrintTypeOrders(result), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        if (containsAny(message, "인쇄구분") && containsAny(message, "일괄 변경", "일괄변경", "전체 변경", "일괄수정")) {
+            return new AgentChatResponse(
+                true,
+                "인쇄구분 일괄 변경은 가능합니다.\n변경 전후 값을 같이 말해 주세요.\n예: `면세점을 별도인쇄로 일괄 변경해줘`",
+                model,
+                !blank(apiKey),
+                proposedAction,
+                toolCalls,
+                warnings
+            );
+        }
+
         String productKeyword = extractProductKeyword(message);
         if (productKeyword != null) {
             Map<String, Object> result = toolService.searchProducts(productKeyword, 10);
@@ -567,6 +613,10 @@ public class OmsAgentService {
             if ("search_products".equals(toolName)) {
                 Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
                 return "상품 조회 결과 " + result.getOrDefault("count", 0) + "건입니다.";
+            }
+            if ("search_orders_by_print_type".equals(toolName)) {
+                Map<String, Object> result = toolService.executeTool(toolName, castArgs(toolCalls.get(toolCalls.size() - 1).get("arguments")));
+                return formatPrintTypeOrders(result);
             }
         }
         return "현재 질문에 대해 생성된 답변이 없습니다. 더 구체적으로 질문해 주세요.";
@@ -760,6 +810,30 @@ public class OmsAgentService {
             .replace("해줘", " ")
             .trim();
 
+        return keyword.isBlank() ? null : keyword;
+    }
+
+    private String extractPrintTypeKeyword(String message) {
+        if (!containsAny(message, "인쇄구분", "면세점", "별도인쇄", "일반건")) {
+            return null;
+        }
+        if (!containsAny(message, "보여", "조회", "검색", "주문")) {
+            return null;
+        }
+        String keyword = message.trim()
+            .replace("인쇄구분", " ")
+            .replace("주문만", " ")
+            .replace("주문", " ")
+            .replace("목록", " ")
+            .replace("보여줘", " ")
+            .replace("보여 줘", " ")
+            .replace("보여", " ")
+            .replace("조회해줘", " ")
+            .replace("조회", " ")
+            .replace("검색해줘", " ")
+            .replace("검색", " ")
+            .replace("해줘", " ")
+            .trim();
         return keyword.isBlank() ? null : keyword;
     }
 
@@ -1196,6 +1270,54 @@ public class OmsAgentService {
             case "CANCELLED" -> "취소";
             default -> value.isBlank() ? "-" : value;
         };
+    }
+
+    private String formatPrintTypeOrders(Map<String, Object> result) {
+        if (!Boolean.TRUE.equals(result.get("matched"))) {
+            return "해당 인쇄구분을 찾지 못했습니다.\n등록된 인쇄구분명이나 코드를 같이 적어 주세요.";
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.get("orders");
+        String printTypeName = valueOrDash(result.get("printTypeName"));
+        int count = orders != null ? orders.size() : 0;
+        if (count == 0) {
+            return printTypeName + " 인쇄구분 주문은 없습니다.";
+        }
+        String lines = orders.stream()
+            .limit(5)
+            .map(order -> "- %s / %s / %s".formatted(
+                valueOrDash(order.get("orderNo")),
+                formatOrderStatus(order.get("status")),
+                valueOrDash(order.get("recipientName"))
+            ))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("- 표시할 주문이 없습니다.");
+        return """
+            %s 인쇄구분 주문 %d건입니다.
+            %s
+            """.formatted(printTypeName, count, lines).trim();
+    }
+
+    private boolean isGreetingMessage(String message) {
+        String normalized = message != null ? message.trim().toLowerCase(Locale.ROOT) : "";
+        return List.of("안녕", "안녕하세요", "하이", "hello", "hi", "반가워").contains(normalized);
+    }
+
+    private String buildGreetingReply(String rawMessage) {
+        return """
+            안녕하세요.
+            주문, 재고, 반품, 출고 현황 조회와 승인형 작업 제안을 처리할 수 있습니다.
+            예: `어제 출고 건수 알려줘`, `사방넷 주문수집 실행해줘`
+            """.trim();
+    }
+
+    private String buildCapabilityReply() {
+        return """
+            지금 가능한 작업입니다.
+            - 조회: 주문, 출고, 반품/교환, 재고, 상품, 인쇄구분 주문 조회
+            - 승인형 실행: 사방넷 주문수집, 전체 송장 자동부여, 어제 미출고 일괄 보류, 인쇄구분 일괄 변경
+            - 예: `면세점 주문 보여줘`, `면세점을 별도인쇄로 일괄 변경해줘`
+            """.trim();
     }
 
     private String valueOrDash(Object rawValue) {

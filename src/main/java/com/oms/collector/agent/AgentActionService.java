@@ -7,15 +7,28 @@ import com.oms.collector.controller.CancelController;
 import com.oms.collector.controller.CsMemoController;
 import com.oms.collector.controller.InvoiceController;
 import com.oms.collector.controller.StockMatchingController;
+import com.oms.collector.entity.Order;
+import com.oms.collector.entity.PrintType;
+import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.PrintTypeRepository;
+import com.oms.collector.service.SabangnetOrderCollectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -30,12 +43,16 @@ public class AgentActionService {
     private static final Pattern WAREHOUSE_PATTERN = Pattern.compile("(ANYANG|ICHEON_BOX|ICHEON_PCS|BUCHEON)", Pattern.CASE_INSENSITIVE);
     private static final Pattern MEMO_PATTERN = Pattern.compile("(?:메모|memo)\\s*[:：]?\\s*(.+)$", Pattern.CASE_INSENSITIVE);
     private static final long TOKEN_TTL_SECONDS = 600;
+    private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
 
     private final InvoiceController invoiceController;
     private final AllocationController allocationController;
     private final CancelController cancelController;
     private final StockMatchingController stockMatchingController;
     private final CsMemoController csMemoController;
+    private final SabangnetOrderCollectionService sabangnetOrderCollectionService;
+    private final OrderRepository orderRepository;
+    private final PrintTypeRepository printTypeRepository;
 
     private final Map<String, StoredAction> pendingActions = new ConcurrentHashMap<>();
 
@@ -74,6 +91,29 @@ public class AgentActionService {
             );
         }
 
+        if (containsAny(normalized, "사방넷 주문수집", "사방넷 주문 수집", "사방넷 수집", "주문수집 실행", "주문 수집 실행")) {
+            return storeProposal(
+                "COLLECT_SABANGNET_ORDERS",
+                "사방넷 주문수집 실행",
+                "현재 회사코드 기준 사방넷 연동 주문 수집을 즉시 실행합니다.",
+                "medium",
+                Map.of()
+            );
+        }
+
+        if (containsAny(normalized, "미출고") && containsAny(normalized, "보류", "보류 처리", "보류설정") && message != null && message.contains("어제")) {
+            return storeProposal(
+                "HOLD_YESTERDAY_UNSHIPPED",
+                "어제 미출고 주문 일괄 보류",
+                "어제 주문된 미출고 주문을 일괄 보류 처리합니다.",
+                "high",
+                Map.of(
+                    "date", LocalDate.now(OMS_ZONE).minusDays(1).toString(),
+                    "reason", "AI 일괄보류 / 어제 미출고 주문"
+                )
+            );
+        }
+
         if (orderNo != null && containsAny(normalized, "송장 삭제", "송장삭제", "송장 지워", "delete invoice")) {
             return storeProposal(
                 "DELETE_INVOICE",
@@ -82,6 +122,24 @@ public class AgentActionService {
                 "medium",
                 Map.of("orderNo", orderNo)
             );
+        }
+
+        if (containsAny(normalized, "인쇄구분") && containsAny(normalized, "일괄 변경", "일괄변경", "전체 변경", "일괄수정")) {
+            PrintTypeChangeSelection selection = resolvePrintTypeChange(message);
+            if (selection != null) {
+                return storeProposal(
+                    "BULK_CHANGE_PRINT_TYPE",
+                    "인쇄구분 일괄 변경",
+                    selection.source().getName() + " 주문의 인쇄구분을 " + selection.target().getName() + "으로 일괄 변경합니다.",
+                    "medium",
+                    Map.of(
+                        "sourceCode", selection.source().getCode(),
+                        "sourceName", selection.source().getName(),
+                        "targetCode", selection.target().getCode(),
+                        "targetName", selection.target().getName()
+                    )
+                );
+            }
         }
 
         if (orderNo != null && containsAny(normalized, "발송 취소", "발송취소", "배송 취소", "cancel shipment")) {
@@ -173,6 +231,7 @@ public class AgentActionService {
         return null;
     }
 
+    @Transactional
     public AgentExecuteResponse execute(String confirmationToken) {
         clearExpired();
         StoredAction stored = pendingActions.remove(confirmationToken);
@@ -194,6 +253,16 @@ public class AgentActionService {
                     "orderNos", java.util.List.of(stored.params.get("orderNo"))
                 ));
                 case "CANCEL_ORDER" -> cancelController.cancel(stored.params.get("orderNo"), stored.params);
+                case "COLLECT_SABANGNET_ORDERS" -> {
+                    SabangnetOrderCollectionService.SabangnetCollectResult result = sabangnetOrderCollectionService.collect(null, null);
+                    yield ResponseEntity.status(result.success() ? 200 : 400).body(Map.of(
+                        "success", result.success(),
+                        "message", Objects.toString(result.message(), "사방넷 주문 수집 완료")
+                            + " · 수집 " + result.collectedCount() + "건 · 저장 " + result.savedCount() + "건 · 주문생성 " + result.processedCount() + "건"
+                    ));
+                }
+                case "HOLD_YESTERDAY_UNSHIPPED" -> ResponseEntity.ok(executeYesterdayUnshippedHold(stored.params));
+                case "BULK_CHANGE_PRINT_TYPE" -> ResponseEntity.ok(executeBulkPrintTypeChange(stored.params));
                 case "ADD_CS_MEMO" -> {
                     CsMemoController.MemoCreateRequest req = new CsMemoController.MemoCreateRequest();
                     req.orderNo = stored.params.get("orderNo");
@@ -259,9 +328,92 @@ public class AgentActionService {
         };
     }
 
+    private Map<String, Object> executeYesterdayUnshippedHold(Map<String, String> params) {
+        LocalDate targetDate = LocalDate.parse(params.getOrDefault("date", LocalDate.now(OMS_ZONE).minusDays(1).toString()));
+        String reason = params.getOrDefault("reason", "AI 일괄보류 / 어제 미출고 주문");
+        LocalDateTime start = targetDate.atStartOfDay();
+        LocalDateTime end = targetDate.atTime(23, 59, 59);
+
+        List<Order> changed = orderRepository.findByDateRange(start, end).stream()
+            .filter(order -> order.getOrderStatus() == Order.OrderStatus.PENDING || order.getOrderStatus() == Order.OrderStatus.CONFIRMED)
+            .filter(order -> !Boolean.TRUE.equals(order.getShippingHold()))
+            .toList();
+
+        changed.forEach(order -> {
+            order.setShippingHold(true);
+            order.setHoldReason(reason);
+        });
+        orderRepository.saveAll(changed);
+
+        return Map.of(
+            "success", true,
+            "message", changed.isEmpty()
+                ? targetDate + " 기준 미출고 주문 중 새로 보류할 대상이 없습니다."
+                : targetDate + " 기준 미출고 주문 " + changed.size() + "건을 보류 처리했습니다."
+        );
+    }
+
+    private Map<String, Object> executeBulkPrintTypeChange(Map<String, String> params) {
+        String sourceCode = params.get("sourceCode");
+        String sourceName = params.get("sourceName");
+        String targetCode = params.get("targetCode");
+        String targetName = params.get("targetName");
+
+        List<Order> changed = new ArrayList<>(orderRepository.findByPrintTypeCodeAndOrderStatusNot(sourceCode, Order.OrderStatus.CANCELLED));
+        changed.forEach(order -> {
+            order.setPrintTypeCode(targetCode);
+            order.setPrintTypeName(targetName);
+        });
+        orderRepository.saveAll(changed);
+
+        return Map.of(
+            "success", true,
+            "message", changed.isEmpty()
+                ? sourceName + " 인쇄구분 대상 주문이 없습니다."
+                : sourceName + " 주문 " + changed.size() + "건의 인쇄구분을 " + targetName + "으로 변경했습니다."
+        );
+    }
+
+    private PrintTypeChangeSelection resolvePrintTypeChange(String message) {
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        List<PrintTypeMatch> matches = new ArrayList<>();
+        for (PrintType type : printTypeRepository.findAllByOrderBySortOrderAscNameAsc()) {
+            collectPrintTypeMatch(matches, normalized, type, type.getName());
+            collectPrintTypeMatch(matches, normalized, type, type.getCode());
+        }
+        matches.sort((a, b) -> Integer.compare(a.index(), b.index()));
+
+        List<PrintType> distinct = matches.stream()
+            .map(PrintTypeMatch::type)
+            .distinct()
+            .toList();
+
+        if (distinct.size() < 2) {
+            return null;
+        }
+        return new PrintTypeChangeSelection(distinct.get(0), distinct.get(1));
+    }
+
+    private void collectPrintTypeMatch(List<PrintTypeMatch> matches, String normalizedMessage, PrintType type, String token) {
+        if (token == null || token.isBlank()) {
+            return;
+        }
+        int index = normalizedMessage.indexOf(token.toLowerCase(Locale.ROOT));
+        if (index >= 0) {
+            matches.add(new PrintTypeMatch(type, index));
+        }
+    }
+
     private record StoredAction(
         String actionType,
         Map<String, String> params,
         Instant expiresAt
     ) {}
+
+    private record PrintTypeMatch(PrintType type, int index) {}
+
+    private record PrintTypeChangeSelection(PrintType source, PrintType target) {}
 }

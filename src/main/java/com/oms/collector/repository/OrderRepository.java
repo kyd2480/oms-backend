@@ -116,6 +116,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Page<Order> findByOrderStatusIn(java.util.Collection<Order.OrderStatus> statuses, Pageable pageable);
 
+    List<Order> findByPrintTypeCodeAndOrderStatusNot(String printTypeCode, Order.OrderStatus status);
+
     @Query("SELECT o FROM Order o LEFT JOIN FETCH o.channel c " +
            "WHERE (:status IS NULL OR o.orderStatus = :status) " +
            "AND (:keyword IS NULL OR :keyword = '' " +

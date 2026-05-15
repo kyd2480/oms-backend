@@ -2,9 +2,11 @@ package com.oms.collector.agent;
 
 import com.oms.collector.entity.Order;
 import com.oms.collector.entity.OrderItem;
+import com.oms.collector.entity.PrintType;
 import com.oms.collector.entity.Product;
 import com.oms.collector.entity.ProductReturn;
 import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.PrintTypeRepository;
 import com.oms.collector.repository.ProductRepository;
 import com.oms.collector.repository.ProductReturnRepository;
 import com.oms.collector.service.ProductSearchService;
@@ -32,6 +34,7 @@ public class OmsAgentToolService {
     private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
 
     private final OrderRepository orderRepository;
+    private final PrintTypeRepository printTypeRepository;
     private final ProductRepository productRepository;
     private final ProductReturnRepository productReturnRepository;
     private final ProductSearchService productSearchService;
@@ -324,6 +327,51 @@ public class OmsAgentToolService {
         );
     }
 
+    public Map<String, Object> searchOrdersByPrintType(String printTypeKeyword, Integer limit) {
+        int safeLimit = Math.min(Math.max(limit == null ? 10 : limit, 1), 20);
+        PrintType printType = resolvePrintType(printTypeKeyword);
+        if (printType == null) {
+            return Map.of(
+                "keyword", nullable(printTypeKeyword),
+                "matched", false,
+                "count", 0,
+                "orders", List.of()
+            );
+        }
+
+        List<Map<String, Object>> items = orderRepository.findByPrintTypeCodeAndOrderStatusNot(
+                printType.getCode(),
+                Order.OrderStatus.CANCELLED
+            ).stream()
+            .sorted((a, b) -> {
+                LocalDateTime left = a.getOrderedAt();
+                LocalDateTime right = b.getOrderedAt();
+                if (left == null && right == null) return 0;
+                if (left == null) return 1;
+                if (right == null) return -1;
+                return right.compareTo(left);
+            })
+            .limit(safeLimit)
+            .map(o -> Map.<String, Object>of(
+                "orderNo", nullable(o.getOrderNo()),
+                "status", o.getOrderStatus() != null ? o.getOrderStatus().name() : "",
+                "channelName", o.getChannel() != null ? nullable(o.getChannel().getChannelName()) : "",
+                "recipientName", nullable(o.getRecipientName()),
+                "orderedAt", o.getOrderedAt() != null ? o.getOrderedAt().toString() : "",
+                "productSummary", summarizeItems(o)
+            ))
+            .toList();
+
+        return Map.of(
+            "keyword", nullable(printTypeKeyword),
+            "matched", true,
+            "printTypeCode", nullable(printType.getCode()),
+            "printTypeName", nullable(printType.getName()),
+            "count", items.size(),
+            "orders", items
+        );
+    }
+
     public Map<String, Object> executeTool(String name, Map<String, Object> args) {
         return switch (name) {
             case "get_order_overview" -> getOrderOverview(stringArg(args, "period", "7d"));
@@ -353,6 +401,10 @@ public class OmsAgentToolService {
                 LocalDate.parse(stringArg(args, "endDate", LocalDate.now(OMS_ZONE).toString())),
                 stringArg(args, "channelKeyword", ""),
                 intArg(args, "limit", 3)
+            );
+            case "search_orders_by_print_type" -> searchOrdersByPrintType(
+                stringArg(args, "printTypeKeyword", ""),
+                intArg(args, "limit", 10)
             );
             default -> {
                 Map<String, Object> error = new LinkedHashMap<>();
@@ -413,6 +465,26 @@ public class OmsAgentToolService {
     private String stringArg(Map<String, Object> args, String key, String defaultValue) {
         Object value = args != null ? args.get(key) : null;
         return value != null ? String.valueOf(value) : defaultValue;
+    }
+
+    private PrintType resolvePrintType(String keyword) {
+        String normalized = normalize(keyword);
+        if (normalized.isBlank()) {
+            return null;
+        }
+        return printTypeRepository.findAllByOrderBySortOrderAscNameAsc().stream()
+            .filter(type -> containsPrintTypeKeyword(type, normalized))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private boolean containsPrintTypeKeyword(PrintType type, String normalizedKeyword) {
+        String code = normalize(type.getCode());
+        String name = normalize(type.getName());
+        return code.contains(normalizedKeyword)
+            || name.contains(normalizedKeyword)
+            || normalizedKeyword.contains(code)
+            || normalizedKeyword.contains(name);
     }
 
     private String nullable(String value) {
