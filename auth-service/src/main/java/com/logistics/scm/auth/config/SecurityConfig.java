@@ -15,10 +15,14 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.beans.factory.annotation.Value;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    @Value("${CORS_ALLOWED_ORIGINS:https://stately-bonbon-cc00cb.netlify.app}")
+    private String corsAllowedOrigins;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -40,17 +44,20 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-
-        config.setAllowedOriginPatterns(List.of(
-            "https://stately-bonbon-cc00cb.netlify.app",
-            "https://*.netlify.app",
-            "https://*.railway.app",
-            "http://localhost:5173"
-        ));
+        java.util.List<String> configuredOrigins = java.util.Arrays.stream(corsAllowedOrigins.split(","))
+            .map(String::trim)
+            .filter(value -> !value.isBlank())
+            .toList();
+        if (!configuredOrigins.isEmpty()) {
+            config.setAllowedOrigins(configuredOrigins);
+        }
+        config.addAllowedOriginPattern("https://*.netlify.app");
+        config.addAllowedOriginPattern("https://*.railway.app");
+        config.addAllowedOriginPattern("http://localhost:5173");
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", "Content-Type"));
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
