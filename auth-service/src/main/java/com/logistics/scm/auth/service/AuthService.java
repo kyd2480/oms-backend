@@ -31,6 +31,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenUtil jwtTokenUtil;
     private final VerificationCodeService verificationCodeService;
+    private final MaintenanceService maintenanceService;
 
     /** 회원가입 */
     @Transactional
@@ -88,6 +89,9 @@ public class AuthService {
             if (!user.isEnabled())
                 return LoginResponse.failure("비활성화된 계정입니다");
 
+            if (maintenanceService.isMaintenanceActive() && user.getRole() != User.UserRole.ADMIN)
+                return LoginResponse.failure("현재 시스템 점검 중입니다. 관리자만 로그인할 수 있습니다.");
+
             if (isAccountExpired(user))
                 return LoginResponse.failure("계정 사용기한이 만료되었습니다. 관리자에게 문의하세요.");
 
@@ -127,6 +131,9 @@ public class AuthService {
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
             if (!user.isEnabled()) {
                 return LoginResponse.failure("비활성화된 계정입니다");
+            }
+            if (maintenanceService.isMaintenanceActive() && user.getRole() != User.UserRole.ADMIN) {
+                return LoginResponse.failure("현재 시스템 점검 중입니다. 관리자만 로그인할 수 있습니다.");
             }
             if (isAccountExpired(user)) {
                 return LoginResponse.failure("계정 사용기한이 만료되었습니다. 관리자에게 문의하세요.");

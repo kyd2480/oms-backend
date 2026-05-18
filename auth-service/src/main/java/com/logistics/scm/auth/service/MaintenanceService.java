@@ -72,6 +72,13 @@ public class MaintenanceService {
         return getSettings();
     }
 
+    @Transactional(readOnly = true)
+    public boolean isMaintenanceActive() {
+        Map<String, Object> settings = getSettings();
+        Object active = settings.get("active");
+        return active instanceof Boolean value && value;
+    }
+
     private boolean isActive(boolean enabled, LocalDateTime startAt, LocalDateTime endAt) {
         if (!enabled || startAt == null || endAt == null) {
             return false;
