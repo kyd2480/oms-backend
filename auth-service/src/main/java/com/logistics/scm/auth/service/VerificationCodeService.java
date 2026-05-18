@@ -291,11 +291,11 @@ public class VerificationCodeService {
 
     private void sendHtmlMail(VerificationCode code) throws Exception {
         MimeMessage mimeMessage = javaMailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
+        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
         helper.setFrom(mailFrom);
         helper.setTo(code.getTargetValue());
         helper.setSubject(buildMailSubject(code.getPurpose()));
-        helper.setText(buildMailBody(code), buildMailHtml(code));
+        helper.setText(buildMailHtml(code), true);
         javaMailSender.send(mimeMessage);
     }
 
