@@ -19,8 +19,8 @@ public abstract class AbstractMockMarketShipmentGateway implements MarketShipmen
             carrierCode,
             trackingNo
         );
-        return MarketShipmentSyncService.MarketShipmentSyncResult.success(
-            getChannelName() + " 발송완료 전송 성공"
+        return MarketShipmentSyncService.MarketShipmentSyncResult.failed(
+            getChannelName() + " 판매처 발송 API 미연동(mock)"
         );
     }
 

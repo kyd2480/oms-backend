@@ -72,7 +72,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
         @Param("end")    java.time.LocalDateTime end);
 
     @Query("SELECT o FROM Order o WHERE o.orderStatus = 'SHIPPED' " +
-           "AND o.orderedAt BETWEEN :start AND :end ORDER BY o.orderedAt DESC")
+           "AND o.updatedAt BETWEEN :start AND :end ORDER BY o.updatedAt DESC")
     List<Order> findShippedByDateRange(
         @Param("start") java.time.LocalDateTime start,
         @Param("end")   java.time.LocalDateTime end);

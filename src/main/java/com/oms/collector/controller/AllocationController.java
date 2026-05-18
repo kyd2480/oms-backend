@@ -128,6 +128,8 @@ public class AllocationController {
             ? body.get("warehouseCode") : selectedWarehouseCode;
         String warehouseName = (body != null && body.get("warehouseName") != null && !body.get("warehouseName").isBlank())
             ? body.get("warehouseName") : selectedWarehouseName;
+        String workType = (body != null && body.get("workType") != null && !body.get("workType").isBlank())
+            ? body.get("workType").trim() : "발송및출고";
 
         if (warehouseCode == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "할당 창고가 설정되지 않았습니다"));
@@ -197,7 +199,7 @@ public class AllocationController {
             try {
                 inventoryService.processOutboundWithWarehouse(
                     product.getProductId(), qty, warehouseCode,
-                    order.getOrderId(), "검수발송 출고: " + orderNo
+                    order.getOrderId(), "[" + workType + "] 검수발송 출고: " + orderNo
                 );
                 // 예약 재고 해제 (reservedStock 복구)
                 inventoryService.releaseReservedStock(product.getProductId(), qty);
@@ -220,6 +222,7 @@ public class AllocationController {
         return ResponseEntity.ok(Map.of(
             "success", true,
             "message", "재고 차감 및 발송 처리 완료",
+            "workType", workType,
             "marketSyncSuccess", syncResult.success(),
             "marketSyncMessage", syncResult.message()
         ));

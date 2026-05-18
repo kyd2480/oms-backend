@@ -122,8 +122,8 @@ public class CsOrderController {
 
         boolean directOrderSearch = hasKeyword && ("주문번호".equals(searchType) || "송장번호".equals(searchType));
         if (directOrderSearch) {
-            // CS에서 주문번호/송장번호를 찍어 찾을 때는 기간 제한을 걸지 않는다.
             orders = orderRepository.searchByOrderNoOrTracking(keyword.trim());
+            orders = filterBySelectedDate(orders, start, end, isShippedDate);
         } else if (isTracking && hasKeyword) {
             if (isShippedDate) {
                 // 발송일자 기준 + 송장번호 검색
@@ -157,6 +157,17 @@ public class CsOrderController {
             dateType, searchType, keyword, orders.size());
 
         return ResponseEntity.ok(orders.stream().map(this::toDTO).collect(Collectors.toList()));
+    }
+
+    private List<Order> filterBySelectedDate(List<Order> orders, LocalDateTime start, LocalDateTime end, boolean shippedDate) {
+        return orders.stream()
+            .filter(o -> {
+                LocalDateTime target = shippedDate ? o.getUpdatedAt() : o.getOrderedAt();
+                return target != null
+                    && !target.isBefore(start)
+                    && !target.isAfter(end);
+            })
+            .collect(Collectors.toList());
     }
 
     @PatchMapping("/orders/{orderNo}/shipping")

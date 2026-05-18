@@ -87,6 +87,7 @@ public class DeliveryTrackController {
         public String carrierCode;
         public String carrierName;
         public String currentStatus;
+        public String flowSummary;
         public int stepCount;
         public String lastStepDateTime;
         public String lastStepLocation;
@@ -231,6 +232,13 @@ public class DeliveryTrackController {
         dto.carrierCode = info.carrierCode;
         dto.carrierName = info.carrierName;
         dto.currentStatus = track.currentStatus;
+        dto.flowSummary = track.steps == null ? "" : track.steps.stream()
+            .map(step -> step.status)
+            .filter(status -> status != null && !status.isBlank())
+            .distinct()
+            .limit(6)
+            .reduce((a, b) -> a + " > " + b)
+            .orElse(track.currentStatus != null ? track.currentStatus : "");
         dto.stepCount = track.steps != null ? track.steps.size() : 0;
         TrackStep last = dto.stepCount > 0 ? track.steps.get(0) : null;
         if (last != null) {
