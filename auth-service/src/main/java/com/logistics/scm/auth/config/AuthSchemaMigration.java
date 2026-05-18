@@ -46,6 +46,22 @@ public class AuthSchemaMigration implements CommandLineRunner {
             )
             """);
         execute("CREATE INDEX IF NOT EXISTS idx_verification_lookup ON verification_codes(purpose, method, target_value, username, used, expires_at)");
+        execute("""
+            CREATE TABLE IF NOT EXISTS app_maintenance_settings (
+                id INTEGER PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                start_at TIMESTAMP,
+                end_at TIMESTAMP,
+                title VARCHAR(120),
+                message TEXT,
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """);
+        execute("""
+            INSERT INTO app_maintenance_settings(id, enabled, start_at, end_at, title, message, updated_at)
+            SELECT 1, FALSE, NULL, NULL, '시스템 점검 안내', '보다 안정적인 서비스 제공을 위해 점검 중입니다. 잠시 후 다시 접속해주세요.', NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM app_maintenance_settings WHERE id = 1)
+            """);
         log.info("=== auth-service 스키마 보정 완료 ===");
     }
 

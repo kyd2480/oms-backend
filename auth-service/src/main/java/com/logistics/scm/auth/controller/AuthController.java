@@ -11,6 +11,7 @@ import com.logistics.scm.auth.dto.VerificationConfirmResponse;
 import com.logistics.scm.auth.dto.VerificationSendRequest;
 import com.logistics.scm.auth.dto.VerificationSendResponse;
 import com.logistics.scm.auth.service.AuthService;
+import com.logistics.scm.auth.service.MaintenanceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ import java.util.UUID;
 public class AuthController {
 
     private final AuthService authService;
+    private final MaintenanceService maintenanceService;
 
     /** 회원가입 — POST /api/auth/signup */
     @PostMapping("/signup")
@@ -146,6 +148,35 @@ public class AuthController {
     @GetMapping("/users")
     public ResponseEntity<List<UserDTO>> listUsers() {
         return ResponseEntity.ok(authService.listAllUsers());
+    }
+
+    /** 점검 설정 공개 조회 — GET /api/auth/maintenance/public */
+    @GetMapping("/maintenance/public")
+    public ResponseEntity<?> getPublicMaintenance() {
+        return ResponseEntity.ok(maintenanceService.getSettings());
+    }
+
+    /** 점검 설정 관리자 조회 — GET /api/auth/maintenance */
+    @GetMapping("/maintenance")
+    public ResponseEntity<?> getMaintenance() {
+        return ResponseEntity.ok(maintenanceService.getSettings());
+    }
+
+    /** 점검 설정 저장 — PUT /api/auth/maintenance */
+    @PutMapping("/maintenance")
+    public ResponseEntity<?> updateMaintenance(@RequestBody Map<String, Object> body) {
+        try {
+            Boolean enabled = (Boolean) body.get("enabled");
+            String startAtRaw = body.get("startAt") == null ? null : String.valueOf(body.get("startAt"));
+            String endAtRaw = body.get("endAt") == null ? null : String.valueOf(body.get("endAt"));
+            String title = body.get("title") == null ? null : String.valueOf(body.get("title"));
+            String message = body.get("message") == null ? null : String.valueOf(body.get("message"));
+            java.time.LocalDateTime startAt = (startAtRaw == null || startAtRaw.isBlank()) ? null : java.time.LocalDateTime.parse(startAtRaw);
+            java.time.LocalDateTime endAt = (endAtRaw == null || endAtRaw.isBlank()) ? null : java.time.LocalDateTime.parse(endAtRaw);
+            return ResponseEntity.ok(maintenanceService.updateSettings(enabled, startAt, endAt, title, message));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     /** 페이지 권한 변경 — PUT /api/auth/users/{userId}/permissions (관리자용) */
