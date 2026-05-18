@@ -191,6 +191,31 @@ public class AllocationController {
 
         order.getItems().size();
 
+        List<String> missingProductItems = new ArrayList<>();
+        for (OrderItem item : order.getItems()) {
+            int qty = item.getActiveQuantity();
+            if (qty <= 0) continue;
+            Product product = findProduct(item);
+            if (product == null) {
+                String productName = item.getProductName() != null && !item.getProductName().isBlank()
+                    ? item.getProductName()
+                    : "(상품명없음)";
+                String optionName = item.getOptionName() != null && !item.getOptionName().isBlank()
+                    ? " / " + item.getOptionName()
+                    : "";
+                String productCode = item.getProductCode() != null && !item.getProductCode().isBlank()
+                    ? " [" + item.getProductCode() + "]"
+                    : "";
+                missingProductItems.add(productName + optionName + productCode);
+            }
+        }
+        if (!missingProductItems.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "매칭되지 않은 상품이 있어 출고할 수 없습니다: " + String.join(", ", missingProductItems)
+            ));
+        }
+
         for (OrderItem item : order.getItems()) {
             Product product = findProduct(item);
             if (product == null) continue;

@@ -24,10 +24,27 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
+  mail:
+    host: ${SPRING_MAIL_HOST:}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SPRING_MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:true}
 
 jwt:
   secret: ${JWT_SECRET:oms-secret-key-for-jwt-token-generation-minimum-256-bits-required}
   expiration: ${JWT_EXPIRATION:86400000}
+
+auth:
+  verification:
+    code-expire-minutes: ${AUTH_VERIFICATION_CODE_EXPIRE_MINUTES:10}
+    mail-from: ${AUTH_VERIFICATION_MAIL_FROM:no-reply@saerowms.local}
+    dev-expose-code: ${AUTH_VERIFICATION_DEV_EXPOSE_CODE:true}
 
 logging:
   level:

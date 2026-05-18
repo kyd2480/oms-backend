@@ -36,21 +36,21 @@ public class DataInitializer {
             // 1. Admin 계정 생성
             if (!userRepository.existsByUsername("admin")) {
                 User admin = User.create("admin", passwordEncoder.encode("admin123"),
-                    "관리자", "admin@oms.com", User.UserRole.ADMIN, "C00");
+                    "관리자", "admin@oms.com", "01000000000", true, true, User.UserRole.ADMIN, "C00");
                 userRepository.save(admin);
                 log.info("✅ Admin 계정 생성: admin / admin123 (C00)");
             }
 
             if (!userRepository.existsByUsername("manager")) {
                 User manager = User.create("manager", passwordEncoder.encode("manager123"),
-                    "매니저", "manager@oms.com", User.UserRole.MANAGER, "C00");
+                    "매니저", "manager@oms.com", "01000000001", true, true, User.UserRole.MANAGER, "C00");
                 userRepository.save(manager);
                 log.info("✅ Manager 계정 생성: manager / manager123 (C00)");
             }
 
             if (!userRepository.existsByUsername("user")) {
                 User user = User.create("user", passwordEncoder.encode("user123"),
-                    "사용자", "user@oms.com", User.UserRole.USER, "C00");
+                    "사용자", "user@oms.com", "01000000002", true, true, User.UserRole.USER, "C00");
                 userRepository.save(user);
                 log.info("✅ User 계정 생성: user / user123 (C00)");
             }
@@ -59,6 +59,14 @@ public class DataInitializer {
             userRepository.findAll().stream()
                 .filter(u -> u.getCompanyCode() == null)
                 .forEach(u -> { u.setCompanyCode("C00"); userRepository.save(u); });
+
+            userRepository.findAll().stream()
+                .filter(u -> u.getEmailVerified() == null)
+                .forEach(u -> {
+                    u.setEmailVerified(u.getEmail() != null && !u.getEmail().isBlank());
+                    u.setPhoneVerified(u.getPhone() != null && !u.getPhone().isBlank());
+                    userRepository.save(u);
+                });
 
             log.info("=== 초기 데이터 생성 완료 ===");
             log.info("총 사용자 수: {}", userRepository.count());

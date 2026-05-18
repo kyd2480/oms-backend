@@ -25,6 +25,9 @@ public class UserDTO {
     private String username;
     private String name;
     private String email;
+    private String phone;
+    private Boolean emailVerified;
+    private Boolean phoneVerified;
     private String role;
     private String companyCode;
     private Boolean enabled;
@@ -42,6 +45,9 @@ public class UserDTO {
                 .username(user.getUsername())
                 .name(user.getName())
                 .email(user.getEmail())
+                .phone(user.getPhone())
+                .emailVerified(user.getEmailVerified())
+                .phoneVerified(user.getPhoneVerified())
                 .role(user.getRole().name())
                 .companyCode(user.getCompanyCode() != null ? user.getCompanyCode() : "C00")
                 .enabled(user.getEnabled())

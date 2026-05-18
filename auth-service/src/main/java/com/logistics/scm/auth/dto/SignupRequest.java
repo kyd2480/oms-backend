@@ -1,6 +1,5 @@
 package com.logistics.scm.auth.dto;
 
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -26,9 +25,15 @@ public class SignupRequest {
     @NotBlank(message = "이름을 입력해주세요")
     private String name;
 
-    @NotBlank(message = "이메일을 입력해주세요")
-    @Email(message = "올바른 이메일 형식이 아닙니다")
     private String email;
+
+    private String phone;
+
+    @NotBlank(message = "인증 수단을 선택해주세요")
+    private String verificationMethod;
+
+    @NotBlank(message = "인증이 완료되어야 합니다")
+    private String verificationToken;
 
     /** 관리자가 부여하는 회사 코드 (미입력 시 C00) */
     private String companyCode;

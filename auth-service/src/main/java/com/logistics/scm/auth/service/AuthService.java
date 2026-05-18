@@ -2,9 +2,14 @@ package com.logistics.scm.auth.service;
 
 import com.logistics.scm.auth.dto.LoginRequest;
 import com.logistics.scm.auth.dto.LoginResponse;
+import com.logistics.scm.auth.dto.ResetPasswordRequest;
 import com.logistics.scm.auth.dto.SignupRequest;
 import com.logistics.scm.auth.dto.UserDTO;
+import com.logistics.scm.auth.dto.VerificationConfirmRequest;
+import com.logistics.scm.auth.dto.VerificationConfirmResponse;
+import com.logistics.scm.auth.dto.VerificationSendResponse;
 import com.logistics.scm.auth.entity.User;
+import com.logistics.scm.auth.entity.VerificationCode;
 import com.logistics.scm.auth.repository.UserRepository;
 import com.logistics.scm.auth.util.JwtTokenUtil;
 import lombok.RequiredArgsConstructor;
@@ -21,31 +26,51 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenUtil jwtTokenUtil;
+    private final VerificationCodeService verificationCodeService;
 
     /** 회원가입 */
     @Transactional
     public LoginResponse signup(SignupRequest request) {
-        if (userRepository.existsByUsername(request.getUsername()))
-            return LoginResponse.failure("이미 사용 중인 아이디입니다");
-        if (userRepository.existsByEmail(request.getEmail()))
-            return LoginResponse.failure("이미 사용 중인 이메일입니다");
+        try {
+            if (userRepository.existsByUsername(request.getUsername()))
+                return LoginResponse.failure("이미 사용 중인 아이디입니다");
+            String email = normalizeEmail(request.getEmail());
+            String phone = normalizePhone(request.getPhone());
+            if (email == null && phone == null) {
+                return LoginResponse.failure("이메일 또는 연락처를 하나 이상 입력하세요.");
+            }
+            if (email != null && userRepository.existsByEmail(email))
+                return LoginResponse.failure("이미 사용 중인 이메일입니다");
+            if (phone != null && userRepository.existsByPhone(phone))
+                return LoginResponse.failure("이미 사용 중인 연락처입니다");
 
-        String companyCode = (request.getCompanyCode() != null && !request.getCompanyCode().isBlank())
-            ? request.getCompanyCode().toUpperCase() : "C00";
+            String companyCode = (request.getCompanyCode() != null && !request.getCompanyCode().isBlank())
+                ? request.getCompanyCode().toUpperCase() : "C00";
+            VerificationCode.Method method = verificationCodeService.parseMethod(request.getVerificationMethod());
+            verificationCodeService.consumeSignupVerification(request.getVerificationToken(), method, email, phone);
 
-        User user = User.create(
-            request.getUsername(),
-            passwordEncoder.encode(request.getPassword()),
-            request.getName(),
-            request.getEmail(),
-            User.UserRole.USER,
-            companyCode
-        );
-        userRepository.save(user);
+            boolean emailVerified = method == VerificationCode.Method.EMAIL && email != null;
+            boolean phoneVerified = method == VerificationCode.Method.PHONE && phone != null;
 
-        String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
-        log.info("회원가입 완료: username={}", user.getUsername());
-        return LoginResponse.success(token, UserDTO.from(user));
+            User user = User.create(
+                request.getUsername(),
+                passwordEncoder.encode(request.getPassword()),
+                request.getName(),
+                email,
+                phone,
+                emailVerified,
+                phoneVerified,
+                User.UserRole.USER,
+                companyCode
+            );
+            userRepository.save(user);
+
+            String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
+            log.info("회원가입 완료: username={}", user.getUsername());
+            return LoginResponse.success(token, UserDTO.from(user));
+        } catch (RuntimeException e) {
+            return LoginResponse.failure(e.getMessage());
+        }
     }
 
     /** 로그인 */
@@ -164,5 +189,85 @@ public class AuthService {
             throw new RuntimeException("유효하지 않은 회사코드입니다");
         }
         return code;
+    }
+
+    public String encodePassword(String password) {
+        return passwordEncoder.encode(password);
+    }
+
+    public VerificationSendResponse sendSignupVerificationCode(String method, String email, String phone) {
+        try {
+            return verificationCodeService.sendSignupCode(verificationCodeService.parseMethod(method), email, phone);
+        } catch (RuntimeException e) {
+            return VerificationSendResponse.failure(e.getMessage());
+        }
+    }
+
+    public VerificationConfirmResponse confirmSignupVerificationCode(VerificationConfirmRequest request) {
+        try {
+            return verificationCodeService.confirmSignupCode(request);
+        } catch (RuntimeException e) {
+            return VerificationConfirmResponse.failure(e.getMessage());
+        }
+    }
+
+    public VerificationSendResponse sendFindIdVerificationCode(String method, String email, String phone) {
+        try {
+            return verificationCodeService.sendFindIdCode(verificationCodeService.parseMethod(method), email, phone);
+        } catch (RuntimeException e) {
+            return VerificationSendResponse.failure(e.getMessage());
+        }
+    }
+
+    public VerificationConfirmResponse findUsername(VerificationConfirmRequest request) {
+        try {
+            return verificationCodeService.confirmFindIdCode(request);
+        } catch (RuntimeException e) {
+            return VerificationConfirmResponse.failure(e.getMessage());
+        }
+    }
+
+    public VerificationSendResponse sendResetPasswordVerificationCode(String method, String username, String email, String phone) {
+        try {
+            return verificationCodeService.sendResetPasswordCode(verificationCodeService.parseMethod(method), username, email, phone);
+        } catch (RuntimeException e) {
+            return VerificationSendResponse.failure(e.getMessage());
+        }
+    }
+
+    public VerificationConfirmResponse resetPassword(ResetPasswordRequest request) {
+        VerificationConfirmRequest confirmRequest = new VerificationConfirmRequest();
+        confirmRequest.setMethod(request.getMethod());
+        confirmRequest.setUsername(request.getUsername());
+        confirmRequest.setEmail(request.getEmail());
+        confirmRequest.setPhone(request.getPhone());
+        confirmRequest.setCode(request.getCode());
+        try {
+            return verificationCodeService.resetPassword(confirmRequest, request.getNewPassword(), this);
+        } catch (RuntimeException e) {
+            return VerificationConfirmResponse.failure(e.getMessage());
+        }
+    }
+
+    private String normalizeEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        String value = email.trim().toLowerCase();
+        if (!value.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new RuntimeException("올바른 이메일 형식이 아닙니다.");
+        }
+        return value;
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return null;
+        }
+        String digits = phone.replaceAll("[^0-9]", "");
+        if (digits.length() < 10 || digits.length() > 11) {
+            throw new RuntimeException("올바른 연락처 형식이 아닙니다.");
+        }
+        return digits;
     }
 }

@@ -26,7 +26,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "USERS", indexes = {
     @Index(name = "idx_username", columnList = "username"),
-    @Index(name = "idx_email", columnList = "email")
+    @Index(name = "idx_email", columnList = "email"),
+    @Index(name = "idx_phone", columnList = "phone")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class User {
@@ -45,8 +46,17 @@ public class User {
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
-    @Column(name = "email", nullable = false, unique = true, length = 100)
+    @Column(name = "email", unique = true, length = 100)
     private String email;
+
+    @Column(name = "phone", unique = true, length = 20)
+    private String phone;
+
+    @Column(name = "email_verified", nullable = false)
+    private Boolean emailVerified = false;
+
+    @Column(name = "phone_verified", nullable = false)
+    private Boolean phoneVerified = false;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
@@ -95,12 +105,15 @@ public class User {
     }
 
     // Builder Pattern
-    public static User create(String username, String password, String name, String email, UserRole role, String companyCode) {
+    public static User create(String username, String password, String name, String email, String phone, boolean emailVerified, boolean phoneVerified, UserRole role, String companyCode) {
         User user = new User();
         user.username = username;
         user.password = password;
         user.name = name;
         user.email = email;
+        user.phone = phone;
+        user.emailVerified = emailVerified;
+        user.phoneVerified = phoneVerified;
         user.role = role;
         user.companyCode = companyCode != null ? companyCode.toUpperCase() : "C00";
         user.enabled = true;

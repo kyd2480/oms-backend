@@ -2,8 +2,13 @@ package com.logistics.scm.auth.controller;
 
 import com.logistics.scm.auth.dto.LoginRequest;
 import com.logistics.scm.auth.dto.LoginResponse;
+import com.logistics.scm.auth.dto.ResetPasswordRequest;
 import com.logistics.scm.auth.dto.SignupRequest;
 import com.logistics.scm.auth.dto.UserDTO;
+import com.logistics.scm.auth.dto.VerificationConfirmRequest;
+import com.logistics.scm.auth.dto.VerificationConfirmResponse;
+import com.logistics.scm.auth.dto.VerificationSendRequest;
+import com.logistics.scm.auth.dto.VerificationSendResponse;
 import com.logistics.scm.auth.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +47,44 @@ public class AuthController {
         return response.isSuccess()
             ? ResponseEntity.ok(response)
             : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/signup/send-code")
+    public ResponseEntity<VerificationSendResponse> sendSignupCode(@RequestBody VerificationSendRequest request) {
+        VerificationSendResponse response = authService.sendSignupVerificationCode(request.getMethod(), request.getEmail(), request.getPhone());
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/signup/verify-code")
+    public ResponseEntity<VerificationConfirmResponse> verifySignupCode(@RequestBody VerificationConfirmRequest request) {
+        VerificationConfirmResponse response = authService.confirmSignupVerificationCode(request);
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/find-id/send-code")
+    public ResponseEntity<VerificationSendResponse> sendFindIdCode(@RequestBody VerificationSendRequest request) {
+        VerificationSendResponse response = authService.sendFindIdVerificationCode(request.getMethod(), request.getEmail(), request.getPhone());
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/find-id/verify-code")
+    public ResponseEntity<VerificationConfirmResponse> findId(@RequestBody VerificationConfirmRequest request) {
+        VerificationConfirmResponse response = authService.findUsername(request);
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/password-reset/send-code")
+    public ResponseEntity<VerificationSendResponse> sendResetPasswordCode(@RequestBody VerificationSendRequest request) {
+        VerificationSendResponse response = authService.sendResetPasswordVerificationCode(
+            request.getMethod(), request.getUsername(), request.getEmail(), request.getPhone()
+        );
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/password-reset/confirm")
+    public ResponseEntity<VerificationConfirmResponse> resetPassword(@RequestBody ResetPasswordRequest request) {
+        VerificationConfirmResponse response = authService.resetPassword(request);
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
     }
 
     /** 관리자 회사 컨텍스트 선택 — POST /api/auth/admin/company-context */

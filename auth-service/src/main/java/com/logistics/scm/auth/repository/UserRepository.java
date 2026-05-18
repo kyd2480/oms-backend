@@ -26,6 +26,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      */
     Optional<User> findByEmail(String email);
 
+    Optional<User> findByPhone(String phone);
+
     /**
      * 사용자명 존재 여부 확인
      */
@@ -35,4 +37,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * 이메일 존재 여부 확인
      */
     boolean existsByEmail(String email);
+
+    boolean existsByPhone(String phone);
 }
