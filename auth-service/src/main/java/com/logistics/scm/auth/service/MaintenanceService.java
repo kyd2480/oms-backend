@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Map;
 
 @Service
@@ -15,6 +16,7 @@ public class MaintenanceService {
 
     private static final String DEFAULT_TITLE = "시스템 점검 안내";
     private static final String DEFAULT_MESSAGE = "보다 안정적인 서비스 제공을 위해 점검 중입니다. 잠시 후 다시 접속해주세요.";
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Seoul");
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -74,7 +76,7 @@ public class MaintenanceService {
         if (!enabled || startAt == null || endAt == null) {
             return false;
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(APP_ZONE);
         return (!now.isBefore(startAt)) && (!now.isAfter(endAt));
     }
 
