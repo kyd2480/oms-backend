@@ -26,7 +26,16 @@ public abstract class AbstractMockMarketShipmentGateway implements MarketShipmen
 
     @Override
     public boolean supports(String channelCode) {
-        return getChannelCode().equalsIgnoreCase(channelCode);
+        if (channelCode == null || channelCode.isBlank()) {
+            return false;
+        }
+        if (getChannelCode().equalsIgnoreCase(channelCode)) {
+            return true;
+        }
+        if (channelCode.startsWith("SABANGNET_")) {
+            return getChannelCode().equalsIgnoreCase(channelCode.substring("SABANGNET_".length()));
+        }
+        return false;
     }
 
     protected abstract String getChannelCode();

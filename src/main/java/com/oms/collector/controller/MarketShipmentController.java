@@ -41,13 +41,14 @@ public class MarketShipmentController {
     ) {
         public static MarketShipmentDto from(Order order) {
             InvoiceInfo invoice = extractInvoiceInfo(order.getDeliveryMemo());
-            String marketSyncStatus = resolveEffectiveMarketSyncStatus(order, invoice);
-            String marketSyncMessage = resolveEffectiveMarketSyncMessage(order, invoice, marketSyncStatus);
+            String resolvedChannelOrderNo = resolveChannelOrderNo(order);
+            String marketSyncStatus = resolveEffectiveMarketSyncStatus(order, invoice, resolvedChannelOrderNo);
+            String marketSyncMessage = resolveEffectiveMarketSyncMessage(order, invoice, marketSyncStatus, resolvedChannelOrderNo);
             return new MarketShipmentDto(
                 order.getOrderNo(),
                 order.getChannel() != null ? order.getChannel().getChannelCode() : "",
                 order.getChannel() != null ? order.getChannel().getChannelName() : "",
-                order.getChannelOrderNo(),
+                resolvedChannelOrderNo,
                 order.getRecipientName(),
                 invoice != null ? invoice.carrierName() : "",
                 invoice != null ? invoice.trackingNo() : "",
@@ -151,7 +152,7 @@ public class MarketShipmentController {
         return value != null ? value.toString() : "";
     }
 
-    private static String resolveEffectiveMarketSyncStatus(Order order, InvoiceInfo invoice) {
+    private static String resolveEffectiveMarketSyncStatus(Order order, InvoiceInfo invoice, String channelOrderNo) {
         if (order.getMarketSyncStatus() == Order.MarketSyncStatus.SUCCESS) {
             return Order.MarketSyncStatus.SUCCESS.name();
         }
@@ -162,19 +163,24 @@ public class MarketShipmentController {
         boolean hasChannel = order.getChannel() != null
             && order.getChannel().getChannelCode() != null
             && !order.getChannel().getChannelCode().isBlank();
-        boolean hasChannelOrderNo = order.getChannelOrderNo() != null && !order.getChannelOrderNo().isBlank();
+        boolean hasChannelOrderNo = channelOrderNo != null && !channelOrderNo.isBlank();
         boolean hasTracking = invoice != null && invoice.trackingNo() != null && !invoice.trackingNo().isBlank();
 
         if (hasChannel && hasChannelOrderNo && hasTracking) {
             return Order.MarketSyncStatus.PENDING.name();
         }
+        if (hasChannel && hasTracking) {
+            return Order.MarketSyncStatus.FAILED.name();
+        }
         return Order.MarketSyncStatus.NOT_REQUIRED.name();
     }
 
-    private static String resolveEffectiveMarketSyncMessage(Order order, InvoiceInfo invoice, String effectiveStatus) {
+    private static String resolveEffectiveMarketSyncMessage(Order order, InvoiceInfo invoice, String effectiveStatus, String channelOrderNo) {
         if (Order.MarketSyncStatus.SUCCESS.name().equals(effectiveStatus)
             || Order.MarketSyncStatus.FAILED.name().equals(effectiveStatus)) {
-            return order.getMarketSyncMessage();
+            if (order.getMarketSyncMessage() != null && !order.getMarketSyncMessage().isBlank()) {
+                return order.getMarketSyncMessage();
+            }
         }
         if (Order.MarketSyncStatus.PENDING.name().equals(effectiveStatus)) {
             return "검수발송 완료, 판매처 발송완료 API 전송 대기";
@@ -182,13 +188,25 @@ public class MarketShipmentController {
         if (order.getChannel() == null || order.getChannel().getChannelCode() == null || order.getChannel().getChannelCode().isBlank()) {
             return "판매처 정보가 없는 주문";
         }
-        if (order.getChannelOrderNo() == null || order.getChannelOrderNo().isBlank()) {
+        if (channelOrderNo == null || channelOrderNo.isBlank()) {
             return "판매처 주문번호(channelOrderNo) 없음";
         }
         if (invoice == null || invoice.trackingNo() == null || invoice.trackingNo().isBlank()) {
             return "송장정보 없음";
         }
         return order.getMarketSyncMessage();
+    }
+
+    private static String resolveChannelOrderNo(Order order) {
+        if (order.getChannelOrderNo() != null && !order.getChannelOrderNo().isBlank()) {
+            return order.getChannelOrderNo();
+        }
+        if (order.getRawOrder() != null
+            && order.getRawOrder().getChannelOrderNo() != null
+            && !order.getRawOrder().getChannelOrderNo().isBlank()) {
+            return order.getRawOrder().getChannelOrderNo();
+        }
+        return "";
     }
 
     private static InvoiceInfo extractInvoiceInfo(String memo) {

@@ -28,6 +28,7 @@ public class MarketShipmentSyncService {
 
     public MarketShipmentSyncResult syncShipment(Order order, String carrierCode, String carrierName, String trackingNo) {
         order.setMarketSyncAttemptedAt(LocalDateTime.now());
+        String resolvedChannelOrderNo = resolveChannelOrderNo(order);
 
         if (order.getChannel() == null || order.getChannel().getChannelCode() == null || order.getChannel().getChannelCode().isBlank()) {
             order.setMarketSyncStatus(Order.MarketSyncStatus.NOT_REQUIRED);
@@ -37,12 +38,15 @@ public class MarketShipmentSyncService {
             return MarketShipmentSyncResult.success("판매처 연동 대상이 아닌 주문");
         }
 
-        if (order.getChannelOrderNo() == null || order.getChannelOrderNo().isBlank()) {
+        if (resolvedChannelOrderNo == null || resolvedChannelOrderNo.isBlank()) {
             order.setMarketSyncStatus(Order.MarketSyncStatus.FAILED);
             order.setMarketSyncMessage("판매처 주문번호(channelOrderNo)가 없어 발송완료 전송 불가");
             order.setMarketSyncedAt(null);
             orderRepository.save(order);
             return MarketShipmentSyncResult.failed(order.getMarketSyncMessage());
+        }
+        if (order.getChannelOrderNo() == null || order.getChannelOrderNo().isBlank()) {
+            order.setChannelOrderNo(resolvedChannelOrderNo);
         }
 
         String channelCode = order.getChannel().getChannelCode();
@@ -80,5 +84,17 @@ public class MarketShipmentSyncService {
             orderRepository.save(order);
             return MarketShipmentSyncResult.failed(order.getMarketSyncMessage());
         }
+    }
+
+    private String resolveChannelOrderNo(Order order) {
+        if (order.getChannelOrderNo() != null && !order.getChannelOrderNo().isBlank()) {
+            return order.getChannelOrderNo();
+        }
+        if (order.getRawOrder() != null
+            && order.getRawOrder().getChannelOrderNo() != null
+            && !order.getRawOrder().getChannelOrderNo().isBlank()) {
+            return order.getRawOrder().getChannelOrderNo();
+        }
+        return null;
     }
 }

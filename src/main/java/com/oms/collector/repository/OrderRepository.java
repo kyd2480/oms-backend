@@ -16,7 +16,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findByOrderNo(String orderNo);
 
-    @EntityGraph(attributePaths = {"items", "channel"})
+    @EntityGraph(attributePaths = {"items", "channel", "rawOrder"})
     Optional<Order> findWithItemsByOrderNo(String orderNo);
 
     @EntityGraph(attributePaths = {"items", "channel"})
@@ -49,7 +49,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     /**
      * 상태별 전체 주문 조회 — items JOIN FETCH (N+1 방지)
      */
-    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items " +
+    @Query("SELECT DISTINCT o FROM Order o LEFT JOIN FETCH o.items LEFT JOIN FETCH o.channel LEFT JOIN FETCH o.rawOrder " +
            "WHERE o.orderStatus = :status ORDER BY o.orderedAt DESC")
     List<Order> findByOrderStatusWithItems(@Param("status") Order.OrderStatus status);
 
