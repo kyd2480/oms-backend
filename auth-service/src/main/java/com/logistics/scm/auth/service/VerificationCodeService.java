@@ -7,11 +7,12 @@ import com.logistics.scm.auth.entity.User;
 import com.logistics.scm.auth.entity.VerificationCode;
 import com.logistics.scm.auth.repository.UserRepository;
 import com.logistics.scm.auth.repository.VerificationCodeRepository;
+import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -154,12 +155,7 @@ public class VerificationCodeService {
         String masked = maskTarget(code.getMethod(), code.getTargetValue());
         if (code.getMethod() == VerificationCode.Method.EMAIL) {
             try {
-                SimpleMailMessage message = new SimpleMailMessage();
-                message.setFrom(mailFrom);
-                message.setTo(code.getTargetValue());
-                message.setSubject(buildMailSubject(code.getPurpose()));
-                message.setText(buildMailBody(code));
-                javaMailSender.send(message);
+                sendHtmlMail(code);
                 return VerificationSendResponse.success(masked + " 로 인증번호를 발송했습니다.", "EMAIL", devExposeCode ? code.getVerificationCode() : null);
             } catch (Exception e) {
                 log.warn("이메일 인증 발송 실패, mock으로 대체합니다. target={}, reason={}", code.getTargetValue(), e.getMessage());
@@ -291,5 +287,104 @@ public class VerificationCodeService {
             감사합니다.
             새로WMS
             """.formatted(intro, expireMinutes, code.getVerificationCode());
+    }
+
+    private void sendHtmlMail(VerificationCode code) throws Exception {
+        MimeMessage mimeMessage = javaMailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, false, "UTF-8");
+        helper.setFrom(mailFrom);
+        helper.setTo(code.getTargetValue());
+        helper.setSubject(buildMailSubject(code.getPurpose()));
+        helper.setText(buildMailBody(code), buildMailHtml(code));
+        javaMailSender.send(mimeMessage);
+    }
+
+    private String buildMailHtml(VerificationCode code) {
+        String badge = switch (code.getPurpose()) {
+            case SIGNUP -> "회원가입 인증";
+            case FIND_ID -> "아이디 찾기";
+            case RESET_PASSWORD -> "비밀번호 재설정";
+        };
+        String headline = switch (code.getPurpose()) {
+            case SIGNUP -> "회원가입을 계속하려면 인증을 완료하세요";
+            case FIND_ID -> "가입된 아이디 확인을 위해 인증이 필요합니다";
+            case RESET_PASSWORD -> "비밀번호 재설정을 위해 인증이 필요합니다";
+        };
+        String description = switch (code.getPurpose()) {
+            case SIGNUP -> "새로WMS 회원가입 요청이 접수되었습니다. 아래 인증번호를 입력하면 가입을 완료할 수 있습니다.";
+            case FIND_ID -> "새로WMS 계정 확인 요청이 접수되었습니다. 아래 인증번호를 입력하면 가입된 아이디를 확인할 수 있습니다.";
+            case RESET_PASSWORD -> "새로WMS 비밀번호 변경 요청이 접수되었습니다. 아래 인증번호를 입력하면 새 비밀번호를 설정할 수 있습니다.";
+        };
+        String actionLabel = switch (code.getPurpose()) {
+            case SIGNUP -> "회원가입 인증번호";
+            case FIND_ID -> "아이디 찾기 인증번호";
+            case RESET_PASSWORD -> "비밀번호 재설정 인증번호";
+        };
+
+        return """
+            <!doctype html>
+            <html lang="ko">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>%s</title>
+            </head>
+            <body style="margin:0;padding:0;background:#f3f6fb;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;">
+              <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:32px 16px;">
+                <tr>
+                  <td align="center">
+                    <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,0.12);">
+                      <tr>
+                        <td style="background:linear-gradient(135deg,#0f172a 0%%,#1e3a8a 100%%);padding:28px 32px 32px 32px;">
+                          <div style="display:inline-block;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,0.14);color:#dbeafe;font-size:12px;font-weight:700;letter-spacing:0.02em;">%s</div>
+                          <h1 style="margin:18px 0 8px 0;color:#ffffff;font-size:28px;line-height:1.3;font-weight:800;">새로WMS 인증 안내</h1>
+                          <p style="margin:0;color:#cbd5e1;font-size:15px;line-height:1.7;">%s</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:32px;">
+                          <h2 style="margin:0 0 12px 0;color:#0f172a;font-size:22px;line-height:1.4;font-weight:800;">%s</h2>
+                          <p style="margin:0 0 24px 0;color:#475569;font-size:15px;line-height:1.8;">%s</p>
+
+                          <div style="border:1px solid #dbe7ff;border-radius:20px;background:linear-gradient(180deg,#eff6ff 0%%,#ffffff 100%%);padding:24px;text-align:center;">
+                            <div style="margin-bottom:10px;color:#2563eb;font-size:13px;font-weight:700;letter-spacing:0.04em;">%s</div>
+                            <div style="display:inline-block;padding:14px 22px;border-radius:16px;background:#0f172a;color:#ffffff;font-size:34px;font-weight:900;letter-spacing:0.24em;">%s</div>
+                            <div style="margin-top:14px;color:#475569;font-size:14px;line-height:1.6;">인증번호는 <strong style="color:#0f172a;">%d분</strong> 동안 유효합니다.</div>
+                          </div>
+
+                          <div style="margin-top:24px;padding:18px 20px;border-radius:16px;background:#f8fafc;border:1px solid #e2e8f0;">
+                            <div style="color:#0f172a;font-size:14px;font-weight:700;margin-bottom:8px;">확인사항</div>
+                            <ul style="padding-left:18px;margin:0;color:#475569;font-size:14px;line-height:1.8;">
+                              <li>인증번호는 요청하신 화면에서만 입력해주세요.</li>
+                              <li>본인이 요청하지 않았다면 이 메일을 무시하셔도 됩니다.</li>
+                              <li>반복 요청 시 가장 최근에 발급된 인증번호만 유효합니다.</li>
+                            </ul>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 32px 32px 32px;">
+                          <div style="border-top:1px solid #e2e8f0;padding-top:20px;color:#64748b;font-size:13px;line-height:1.8;">
+                            본 메일은 새로WMS 시스템에서 자동 발송되었습니다.<br/>
+                            문의가 필요한 경우 운영 담당자에게 연락해주세요.
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
+            """.formatted(
+            buildMailSubject(code.getPurpose()),
+            badge,
+            badge,
+            headline,
+            description,
+            actionLabel,
+            code.getVerificationCode(),
+            expireMinutes
+        );
     }
 }
