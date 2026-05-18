@@ -157,8 +157,8 @@ public class VerificationCodeService {
                 SimpleMailMessage message = new SimpleMailMessage();
                 message.setFrom(mailFrom);
                 message.setTo(code.getTargetValue());
-                message.setSubject("[새로WMS] 인증번호 안내");
-                message.setText("인증번호는 " + code.getVerificationCode() + " 입니다. " + expireMinutes + "분 내에 입력하세요.");
+                message.setSubject(buildMailSubject(code.getPurpose()));
+                message.setText(buildMailBody(code));
                 javaMailSender.send(message);
                 return VerificationSendResponse.success(masked + " 로 인증번호를 발송했습니다.", "EMAIL", devExposeCode ? code.getVerificationCode() : null);
             } catch (Exception e) {
@@ -262,5 +262,34 @@ public class VerificationCodeService {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private String buildMailSubject(VerificationCode.Purpose purpose) {
+        return switch (purpose) {
+            case SIGNUP -> "[새로WMS] 회원가입 인증번호 안내";
+            case FIND_ID -> "[새로WMS] 아이디 찾기 인증번호 안내";
+            case RESET_PASSWORD -> "[새로WMS] 비밀번호 재설정 인증번호 안내";
+        };
+    }
+
+    private String buildMailBody(VerificationCode code) {
+        String intro = switch (code.getPurpose()) {
+            case SIGNUP -> "새로WMS 회원가입 인증을 요청하셨습니다.";
+            case FIND_ID -> "새로WMS 아이디 찾기 인증을 요청하셨습니다.";
+            case RESET_PASSWORD -> "새로WMS 비밀번호 재설정 인증을 요청하셨습니다.";
+        };
+
+        return """
+            %s
+
+            아래 인증번호를 %d분 이내에 입력해주세요.
+
+            인증번호: %s
+
+            본인이 요청하지 않았다면 이 메일을 무시해주세요.
+
+            감사합니다.
+            새로WMS
+            """.formatted(intro, expireMinutes, code.getVerificationCode());
     }
 }
