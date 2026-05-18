@@ -21,8 +21,13 @@ public class AuthSchemaMigration implements CommandLineRunner {
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)");
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE");
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE");
+        execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP");
+        execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS joined_at DATE");
+        execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at DATE");
         execute("UPDATE users SET email_verified = FALSE WHERE email_verified IS NULL");
         execute("UPDATE users SET phone_verified = FALSE WHERE phone_verified IS NULL");
+        execute("UPDATE users SET password_changed_at = COALESCE(password_changed_at, created_at, NOW())");
+        execute("UPDATE users SET joined_at = COALESCE(joined_at, created_at::date, CURRENT_DATE)");
         execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users(phone) WHERE phone IS NOT NULL");
         execute("""
             CREATE TABLE IF NOT EXISTS verification_codes (

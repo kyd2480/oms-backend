@@ -9,6 +9,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -57,6 +58,15 @@ public class User {
 
     @Column(name = "phone_verified", nullable = false)
     private Boolean phoneVerified = false;
+
+    @Column(name = "password_changed_at")
+    private LocalDateTime passwordChangedAt;
+
+    @Column(name = "joined_at")
+    private LocalDate joinedAt;
+
+    @Column(name = "expires_at")
+    private LocalDate expiresAt;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
@@ -114,6 +124,8 @@ public class User {
         user.phone = phone;
         user.emailVerified = emailVerified;
         user.phoneVerified = phoneVerified;
+        user.passwordChangedAt = LocalDateTime.now();
+        user.joinedAt = LocalDate.now();
         user.role = role;
         user.companyCode = companyCode != null ? companyCode.toUpperCase() : "C00";
         user.enabled = true;

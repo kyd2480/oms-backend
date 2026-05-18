@@ -2,6 +2,7 @@ package com.logistics.scm.auth.controller;
 
 import com.logistics.scm.auth.dto.LoginRequest;
 import com.logistics.scm.auth.dto.LoginResponse;
+import com.logistics.scm.auth.dto.ChangePasswordRequest;
 import com.logistics.scm.auth.dto.ResetPasswordRequest;
 import com.logistics.scm.auth.dto.SignupRequest;
 import com.logistics.scm.auth.dto.UserDTO;
@@ -87,6 +88,15 @@ public class AuthController {
         return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
     }
 
+    @PostMapping("/change-password")
+    public ResponseEntity<VerificationConfirmResponse> changePassword(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody ChangePasswordRequest request) {
+        String token = authHeader.replace("Bearer ", "");
+        VerificationConfirmResponse response = authService.changePassword(token, request);
+        return response.isSuccess() ? ResponseEntity.ok(response) : ResponseEntity.badRequest().body(response);
+    }
+
     /** 관리자 회사 컨텍스트 선택 — POST /api/auth/admin/company-context */
     @PostMapping("/admin/company-context")
     public ResponseEntity<LoginResponse> switchAdminCompanyContext(
@@ -157,6 +167,39 @@ public class AuthController {
         if (code == null || code.isBlank())
             return ResponseEntity.badRequest().body(Map.of("message", "companyCode 필드가 필요합니다"));
         return ResponseEntity.ok(authService.updateCompanyCode(userId, code));
+    }
+
+    /** 만료일 변경 — PUT /api/auth/users/{userId}/account-dates (관리자용) */
+    @PutMapping("/users/{userId}/account-dates")
+    public ResponseEntity<?> updateAccountDates(
+            @PathVariable UUID userId,
+            @RequestBody Map<String, String> body) {
+        try {
+            String expiresAtRaw = body.get("expiresAt");
+            java.time.LocalDate expiresAt = (expiresAtRaw == null || expiresAtRaw.isBlank()) ? null : java.time.LocalDate.parse(expiresAtRaw);
+            return ResponseEntity.ok(authService.updateAccountDates(userId, expiresAt));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    /** 사용자 삭제 — DELETE /api/auth/users/{userId} (관리자용) */
+    @DeleteMapping("/users/{userId}")
+    public ResponseEntity<?> deleteUser(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable UUID userId) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String username = authService.getUsernameFromToken(token);
+            UserDTO requester = authService.listAllUsers().stream()
+                .filter(item -> item.getUsername().equals(username))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("요청 사용자를 찾을 수 없습니다"));
+            authService.deleteUser(requester.getUserId(), userId);
+            return ResponseEntity.ok(Map.of("message", "사용자가 삭제되었습니다"));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     /** 현재 토큰의 회사 코드 반환 — GET /api/auth/company-code */

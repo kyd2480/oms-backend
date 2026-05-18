@@ -2,6 +2,7 @@ package com.logistics.scm.auth.service;
 
 import com.logistics.scm.auth.dto.LoginRequest;
 import com.logistics.scm.auth.dto.LoginResponse;
+import com.logistics.scm.auth.dto.ChangePasswordRequest;
 import com.logistics.scm.auth.dto.ResetPasswordRequest;
 import com.logistics.scm.auth.dto.SignupRequest;
 import com.logistics.scm.auth.dto.UserDTO;
@@ -18,10 +19,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+    private static final long PASSWORD_EXPIRE_DAYS = 90;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -66,8 +70,9 @@ public class AuthService {
             userRepository.save(user);
 
             String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
+            boolean passwordExpired = isPasswordExpired(user);
             log.info("회원가입 완료: username={}", user.getUsername());
-            return LoginResponse.success(token, UserDTO.from(user));
+            return LoginResponse.success(token, UserDTO.from(user, passwordExpired));
         } catch (RuntimeException e) {
             return LoginResponse.failure(e.getMessage());
         }
@@ -83,6 +88,9 @@ public class AuthService {
             if (!user.isEnabled())
                 return LoginResponse.failure("비활성화된 계정입니다");
 
+            if (isAccountExpired(user))
+                return LoginResponse.failure("계정 사용기한이 만료되었습니다. 관리자에게 문의하세요.");
+
             if (!passwordEncoder.matches(request.getPassword(), user.getPassword()))
                 return LoginResponse.failure("아이디 또는 비밀번호가 올바르지 않습니다");
 
@@ -90,8 +98,9 @@ public class AuthService {
             userRepository.save(user);
 
             String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
+            boolean passwordExpired = isPasswordExpired(user);
             log.info("로그인 성공: username={}, role={}", user.getUsername(), user.getRole());
-            return LoginResponse.success(token, UserDTO.from(user));
+            return LoginResponse.success(token, UserDTO.from(user, passwordExpired));
 
         } catch (RuntimeException e) {
             log.error("로그인 실패: {}", e.getMessage());
@@ -119,13 +128,16 @@ public class AuthService {
             if (!user.isEnabled()) {
                 return LoginResponse.failure("비활성화된 계정입니다");
             }
+            if (isAccountExpired(user)) {
+                return LoginResponse.failure("계정 사용기한이 만료되었습니다. 관리자에게 문의하세요.");
+            }
 
             String switchedToken = jwtTokenUtil.generateToken(
                 user.getUsername(),
                 user.getRole().name(),
                 normalizedCode
             );
-            UserDTO switchedUser = UserDTO.from(user);
+            UserDTO switchedUser = UserDTO.from(user, isPasswordExpired(user));
             switchedUser.setCompanyCode(normalizedCode);
             log.info("관리자 회사 컨텍스트 전환: username={}, companyCode={}", username, normalizedCode);
             return LoginResponse.success(switchedToken, switchedUser);
@@ -178,6 +190,30 @@ public class AuthService {
             user.setPagePermissions(String.join(",", pages));
         }
         return UserDTO.from(userRepository.save(user));
+    }
+
+    /** 만료일 변경 (관리자용) */
+    @Transactional
+    public UserDTO updateAccountDates(java.util.UUID userId, LocalDate expiresAt) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+        LocalDate joinedAt = user.getJoinedAt() != null ? user.getJoinedAt() : LocalDate.now();
+        if (expiresAt != null && expiresAt.isBefore(joinedAt)) {
+            throw new RuntimeException("만료날짜는 가입날짜보다 빠를 수 없습니다.");
+        }
+        user.setExpiresAt(expiresAt);
+        return UserDTO.from(userRepository.save(user));
+    }
+
+    /** 사용자 삭제 (관리자용) */
+    @Transactional
+    public void deleteUser(java.util.UUID requesterUserId, java.util.UUID targetUserId) {
+        if (requesterUserId != null && requesterUserId.equals(targetUserId)) {
+            throw new RuntimeException("현재 로그인한 계정은 삭제할 수 없습니다.");
+        }
+        User target = userRepository.findById(targetUserId)
+            .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+        userRepository.delete(target);
     }
 
     private String normalizeCompanyCode(String companyCode) {
@@ -249,6 +285,30 @@ public class AuthService {
         }
     }
 
+    @Transactional
+    public VerificationConfirmResponse changePassword(String token, ChangePasswordRequest request) {
+        try {
+            String username = jwtTokenUtil.getUsernameFromToken(token);
+            User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
+            if (request.getCurrentPassword() == null || !passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+                return VerificationConfirmResponse.failure("현재 비밀번호가 올바르지 않습니다.");
+            }
+            if (request.getNewPassword() == null || request.getNewPassword().length() < 6) {
+                return VerificationConfirmResponse.failure("새 비밀번호는 6자 이상이어야 합니다.");
+            }
+            if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+                return VerificationConfirmResponse.failure("현재 비밀번호와 다른 비밀번호를 입력하세요.");
+            }
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            user.setPasswordChangedAt(java.time.LocalDateTime.now());
+            userRepository.save(user);
+            return VerificationConfirmResponse.success("비밀번호가 변경되었습니다.", null);
+        } catch (RuntimeException e) {
+            return VerificationConfirmResponse.failure(e.getMessage());
+        }
+    }
+
     private String normalizeEmail(String email) {
         if (email == null || email.isBlank()) {
             return null;
@@ -269,5 +329,19 @@ public class AuthService {
             throw new RuntimeException("올바른 연락처 형식이 아닙니다.");
         }
         return digits;
+    }
+
+    private boolean isPasswordExpired(User user) {
+        if (user.getRole() == User.UserRole.ADMIN) {
+            return false;
+        }
+        java.time.LocalDateTime base = user.getPasswordChangedAt() != null
+            ? user.getPasswordChangedAt()
+            : (user.getCreatedAt() != null ? user.getCreatedAt() : java.time.LocalDateTime.now());
+        return base.plusDays(PASSWORD_EXPIRE_DAYS).isBefore(java.time.LocalDateTime.now());
+    }
+
+    private boolean isAccountExpired(User user) {
+        return user.getExpiresAt() != null && !user.getExpiresAt().isAfter(LocalDate.now());
     }
 }
