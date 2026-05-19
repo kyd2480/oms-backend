@@ -62,4 +62,16 @@ public interface RawOrderRepository extends JpaRepository<RawOrder, UUID> {
            "AND r.collectedAt >= :since")
     long countByChannelSince(@Param("channel") SalesChannel channel, 
                              @Param("since") LocalDateTime since);
+
+    @Query("""
+        SELECT r.channel.channelName, COUNT(r), SUM(CASE WHEN r.processed = false THEN 1 ELSE 0 END)
+        FROM RawOrder r
+        GROUP BY r.channel.channelName
+        ORDER BY COUNT(r) DESC, r.channel.channelName ASC
+        """)
+    List<Object[]> fetchCollectionSummaryByChannel();
+
+    long count();
+
+    long countByProcessedFalse();
 }

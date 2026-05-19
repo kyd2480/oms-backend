@@ -144,6 +144,19 @@ public class CollectionController {
             "timestamp", LocalDateTime.now()
         ));
     }
+
+    @GetMapping("/summary")
+    public ResponseEntity<Map<String, Object>> getSummary() {
+        RawOrderService.CollectionSummary summary = rawOrderService.getCollectionSummary();
+
+        return ResponseEntity.ok(Map.of(
+            "totalCollected", summary.totalCollected(),
+            "unprocessedCount", summary.unprocessedCount(),
+            "channelCount", summary.channels().size(),
+            "channels", summary.channels(),
+            "timestamp", LocalDateTime.now()
+        ));
+    }
     
     /**
      * 미처리 주문 조회

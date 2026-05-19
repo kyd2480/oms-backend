@@ -90,6 +90,24 @@ public class RawOrderService {
         
         return rawOrderRepository.findByChannelAndProcessedFalseOrderByCollectedAtAsc(channel);
     }
+
+    @Transactional(readOnly = true)
+    public CollectionSummary getCollectionSummary() {
+        List<Object[]> rows = rawOrderRepository.fetchCollectionSummaryByChannel();
+        List<ChannelSummary> channels = rows.stream()
+            .map(row -> new ChannelSummary(
+                row[0] != null ? row[0].toString() : "기타",
+                toLong(row[1]),
+                toLong(row[2])
+            ))
+            .toList();
+
+        return new CollectionSummary(
+            rawOrderRepository.count(),
+            rawOrderRepository.countByProcessedFalse(),
+            channels
+        );
+    }
     
     /**
      * 주문 처리 완료 표시
@@ -110,4 +128,23 @@ public class RawOrderService {
         rawOrderRepository.save(rawOrder);
         log.error("주문 처리 에러 표시: {} - {}", rawOrder.getChannelOrderNo(), errorMessage);
     }
+
+    private long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return 0L;
+    }
+
+    public record CollectionSummary(
+        long totalCollected,
+        long unprocessedCount,
+        List<ChannelSummary> channels
+    ) {}
+
+    public record ChannelSummary(
+        String channelName,
+        long totalCount,
+        long unprocessedCount
+    ) {}
 }
