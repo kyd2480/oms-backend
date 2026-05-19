@@ -1,10 +1,9 @@
 package com.oms.collector.controller;
 
-import com.oms.collector.dto.CollectedOrder;
 import com.oms.collector.dto.RawOrderDTO;
 import com.oms.collector.entity.RawOrder;
-import com.oms.collector.service.OrderCollectionService;
 import com.oms.collector.service.RawOrderService;
+import com.oms.collector.service.SabangnetOrderCollectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -30,8 +29,8 @@ import java.util.stream.Collectors;
 @CrossOrigin(origins = "*")
 public class CollectionController {
     
-    private final OrderCollectionService collectionService;
     private final RawOrderService rawOrderService;
+    private final SabangnetOrderCollectionService sabangnetOrderCollectionService;
     
     /**
      * 전체 판매처 주문 수집 (수동)
@@ -54,18 +53,23 @@ public class CollectionController {
         }
         
         try {
-            collectionService.collectAllChannels(startDate, endDate);
-            
-            // 미처리 주문 수 조회
-            int unprocessedCount = rawOrderService.getUnprocessedOrders().size();
-            
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "주문 수집 완료",
-                "startDate", startDate.toString(),
-                "endDate", endDate.toString(),
-                "unprocessedOrders", unprocessedCount
-            ));
+            SabangnetOrderCollectionService.SabangnetCollectResult result =
+                sabangnetOrderCollectionService.collect(startDate, endDate);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", result.success());
+            body.put("message", result.message());
+            body.put("startDate", result.startDate() != null ? result.startDate().toString() : startDate.toString());
+            body.put("endDate", result.endDate() != null ? result.endDate().toString() : endDate.toString());
+            body.put("integrationCount", result.integrationCount());
+            body.put("collectedCount", result.collectedCount());
+            body.put("savedCount", result.savedCount());
+            body.put("processedCount", result.processedCount());
+            body.put("errors", result.errors());
+            body.put("unprocessedOrders", rawOrderService.getUnprocessedOrders().size());
+            return result.success()
+                ? ResponseEntity.ok(body)
+                : ResponseEntity.badRequest().body(body);
             
         } catch (Exception e) {
             log.error("주문 수집 실패", e);
@@ -97,15 +101,22 @@ public class CollectionController {
         }
         
         try {
-            List<CollectedOrder> orders = collectionService.collectByChannel(channelCode, startDate, endDate);
-            
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", channelCode + " 주문 수집 완료",
-                "channelCode", channelCode,
-                "collectedCount", orders.size(),
-                "orders", orders
-            ));
+            SabangnetOrderCollectionService.SabangnetCollectResult result =
+                sabangnetOrderCollectionService.collectByIntegrationKey(channelCode, startDate, endDate);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("success", result.success());
+            body.put("message", (result.mallName() != null ? result.mallName() : channelCode) + " 주문 수집 완료");
+            body.put("channelCode", result.channelCode() != null ? result.channelCode() : channelCode);
+            body.put("mallCode", result.mallCode());
+            body.put("mallName", result.mallName());
+            body.put("collectedCount", result.collectedCount());
+            body.put("savedCount", result.savedCount());
+            body.put("processedCount", result.processedCount());
+            body.put("errors", result.errors());
+            return result.success()
+                ? ResponseEntity.ok(body)
+                : ResponseEntity.badRequest().body(body);
             
         } catch (Exception e) {
             log.error("{} 주문 수집 실패", channelCode, e);
@@ -124,12 +135,11 @@ public class CollectionController {
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
         log.info("📊 Collector 상태 조회");
-        
-        Map<String, String> collectorStatus = collectionService.getCollectorStatus();
+
         int unprocessedCount = rawOrderService.getUnprocessedOrders().size();
-        
+
         return ResponseEntity.ok(Map.of(
-            "collectors", collectorStatus,
+            "collectors", Map.of("SABANGNET", "SABANGNET - 설정된 쇼핑몰 기준 수집"),
             "unprocessedOrders", unprocessedCount,
             "timestamp", LocalDateTime.now()
         ));
@@ -205,7 +215,7 @@ public class CollectionController {
         
         try {
             LocalDateTime now = LocalDateTime.now();
-            collectionService.collectAllChannels(now.minusMinutes(10), now);
+            sabangnetOrderCollectionService.collect(now.minusMinutes(10), now);
             
             List<RawOrder> unprocessed = rawOrderService.getUnprocessedOrders();
             

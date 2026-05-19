@@ -98,6 +98,23 @@ public class SabangnetOrderCollectionService {
         return collectIntegration(integration, start, end);
     }
 
+    @Transactional
+    public SabangnetCollectResult collectByIntegrationKey(String integrationKey, LocalDateTime startDate, LocalDateTime endDate) {
+        LocalDateTime end = endDate == null ? LocalDateTime.now() : endDate;
+        LocalDateTime start = startDate == null ? end.minusDays(1) : startDate;
+        String key = integrationKey == null ? "" : integrationKey.trim();
+        if (key.isBlank()) {
+            throw new IllegalArgumentException("쇼핑몰 식별값이 비어 있습니다");
+        }
+
+        SabangnetIntegration integration = integrationRepository.findByEnabledTrueOrderByCreatedAtDesc().stream()
+            .filter(item -> matchesIntegrationKey(item, key))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("사용 중인 사방넷 쇼핑몰 설정을 찾을 수 없습니다: " + key));
+
+        return collectIntegration(integration, start, end);
+    }
+
     private SabangnetCollectResult collectIntegration(SabangnetIntegration integration, LocalDateTime start, LocalDateTime end) {
         String channelCode = channelCode(integration);
         ensureSabangnetChannel(integration, channelCode);
@@ -362,6 +379,18 @@ public class SabangnetOrderCollectionService {
             return integration.getIntegrationName().trim();
         }
         return "사방넷";
+    }
+
+    private boolean matchesIntegrationKey(SabangnetIntegration integration, String key) {
+        return equalsIgnoreCase(integration.getMallCode(), key)
+            || equalsIgnoreCase(integration.getMallName(), key)
+            || equalsIgnoreCase(integration.getIntegrationName(), key)
+            || equalsIgnoreCase(channelCode(integration), key)
+            || equalsIgnoreCase(String.valueOf(integration.getIntegrationId()), key);
+    }
+
+    private boolean equalsIgnoreCase(String left, String right) {
+        return left != null && right != null && left.trim().equalsIgnoreCase(right.trim());
     }
 
     private JsonNode firstArray(JsonNode node, String... names) {
