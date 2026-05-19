@@ -26,6 +26,27 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class AuthService {
     private static final long PASSWORD_EXPIRE_DAYS = 90;
+    private static final java.util.List<String> DEFAULT_SIGNUP_PAGE_PERMISSIONS = java.util.List.of(
+        "orders.orderinput",
+        "orders.allocate",
+        "orders.nameMatch",
+        "orders.dupcheck",
+        "orders.bundle",
+        "orders.stockMatch",
+        "orders.invoice",
+        "orders.inspectShip",
+        "orders.scanErrorCheck",
+        "orders.marketShip",
+        "cs.management",
+        "delivery.track",
+        "cancel.management",
+        "inventory.product.list",
+        "inventory.io.list",
+        "inventory.io.in",
+        "inventory.io.out",
+        "inventory.barcode.product",
+        "inventory.warehouse.moveStock"
+    );
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -68,6 +89,7 @@ public class AuthService {
                 User.UserRole.USER,
                 companyCode
             );
+            user.setPagePermissions(String.join(",", DEFAULT_SIGNUP_PAGE_PERMISSIONS));
             userRepository.save(user);
 
             String token = jwtTokenUtil.generateToken(user.getUsername(), user.getRole().name(), user.getCompanyCode());
