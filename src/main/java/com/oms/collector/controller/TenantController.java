@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -71,6 +72,67 @@ public class TenantController {
     @GetMapping("/list")
     public ResponseEntity<List<String>> list() {
         return ResponseEntity.ok(initService.listTenantSchemas());
+    }
+
+    @GetMapping("/backup/current")
+    public ResponseEntity<Map<String, Object>> backupCurrent() {
+        String schema = TenantContext.getCurrentTenant();
+        if (schema == null || schema.isBlank()) schema = "public";
+        try {
+            return ResponseEntity.ok(initService.exportSchemaBackup(schema));
+        } catch (Exception e) {
+            log.error("[TenantBackup] 현재 스키마 백업 실패: {} - {}", schema, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "백업 실패: " + e.getMessage()
+            ));
+        }
+    }
+
+    @GetMapping("/backup/company/{companyCode}")
+    public ResponseEntity<Map<String, Object>> backupByCompanyCode(@PathVariable String companyCode) {
+        String schema = TenantContext.toSchema(companyCode);
+        try {
+            return ResponseEntity.ok(initService.exportSchemaBackup(schema));
+        } catch (Exception e) {
+            log.error("[TenantBackup] 스키마 백업 실패: {} - {}", schema, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "백업 실패: " + e.getMessage()
+            ));
+        }
+    }
+
+    @PostMapping("/restore/current")
+    public ResponseEntity<Map<String, Object>> restoreCurrent(@RequestParam("file") MultipartFile file) {
+        String schema = TenantContext.getCurrentTenant();
+        if (schema == null || schema.isBlank()) schema = "public";
+        try {
+            return ResponseEntity.ok(initService.restoreSchemaBackup(schema, file));
+        } catch (Exception e) {
+            log.error("[TenantRestore] 현재 스키마 복구 실패: {} - {}", schema, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "복구 실패: " + e.getMessage()
+            ));
+        }
+    }
+
+    @PostMapping("/restore/company/{companyCode}")
+    public ResponseEntity<Map<String, Object>> restoreByCompanyCode(
+        @PathVariable String companyCode,
+        @RequestParam("file") MultipartFile file
+    ) {
+        String schema = TenantContext.toSchema(companyCode);
+        try {
+            return ResponseEntity.ok(initService.restoreSchemaBackup(schema, file));
+        } catch (Exception e) {
+            log.error("[TenantRestore] 스키마 복구 실패: {} - {}", schema, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "복구 실패: " + e.getMessage()
+            ));
+        }
     }
 
     /** 관리자가 새 회사 코드의 스키마를 직접 생성 */
