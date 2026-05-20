@@ -54,6 +54,10 @@ public interface RawOrderRepository extends JpaRepository<RawOrder, UUID> {
      * 에러 발생 주문 조회
      */
     List<RawOrder> findByProcessedFalseAndErrorMessageIsNotNullOrderByCollectedAtDesc();
+
+    long countByProcessedFalseAndErrorMessageIsNotNull();
+
+    List<RawOrder> findTop10ByProcessedFalseAndErrorMessageIsNotNullOrderByCollectedAtDesc();
     
     /**
      * 판매처별 수집 통계

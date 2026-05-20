@@ -77,4 +77,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     @Query("SELECT p FROM Product p WHERE LOWER(p.sku) IN :codes OR LOWER(p.barcode) IN :codes")
     List<Product> findBySkuOrBarcodeInLowercase(@Param("codes") List<String> codes);
+
+    @Query("SELECT COUNT(p) FROM Product p WHERE COALESCE(p.availableStock, 0) < 0 AND p.isActive = true")
+    long countNegativeAvailableStock();
+
+    @Query("SELECT p FROM Product p WHERE COALESCE(p.availableStock, 0) < 0 AND p.isActive = true " +
+           "ORDER BY p.availableStock ASC, p.updatedAt DESC")
+    List<Product> findTop10NegativeAvailableStock();
 }

@@ -10,6 +10,10 @@ import java.util.UUID;
 @Repository
 public interface InvoiceApiLogRepository extends JpaRepository<InvoiceApiLog, UUID> {
 
+    long countBySuccessFalse();
+
+    List<InvoiceApiLog> findTop10BySuccessFalseOrderByCreatedAtDesc();
+
     List<InvoiceApiLog> findTop50ByOrderNoOrderByCreatedAtDesc(String orderNo);
 
     List<InvoiceApiLog> findTop50ByTrackingNoOrderByCreatedAtDesc(String trackingNo);

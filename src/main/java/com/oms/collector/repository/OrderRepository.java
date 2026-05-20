@@ -37,6 +37,16 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     Optional<Order> findFirstByOrderByOrderedAtDesc();
 
+    long countByShippingHoldTrue();
+
+    long countByMarketSyncStatus(Order.MarketSyncStatus marketSyncStatus);
+
+    long countByOrderStatusAndInspectionCompletedFalse(Order.OrderStatus orderStatus);
+
+    List<Order> findTop10ByShippingHoldTrueOrderByUpdatedAtDesc();
+
+    List<Order> findTop10ByMarketSyncStatusOrderByMarketSyncAttemptedAtDesc(Order.MarketSyncStatus marketSyncStatus);
+
     Page<Order> findByOrderStatus(Order.OrderStatus status, Pageable pageable);
 
     @Query("SELECT o FROM Order o WHERE o.orderStatus = :status " +

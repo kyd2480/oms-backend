@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,4 +41,8 @@ public interface ProductReturnRepository extends JpaRepository<ProductReturn, UU
 
     // 상태별 카운트
     long countByStatus(ProductReturn.ReturnStatus status);
+
+    long countByStatusIn(Collection<ProductReturn.ReturnStatus> statuses);
+
+    List<ProductReturn> findTop10ByStatusInOrderByUpdatedAtDesc(Collection<ProductReturn.ReturnStatus> statuses);
 }
