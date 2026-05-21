@@ -226,6 +226,10 @@ public class AuthService {
     public UserDTO updateAccountDates(java.util.UUID userId, LocalDate expiresAt) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+        if (user.getRole() == User.UserRole.ADMIN) {
+            user.setExpiresAt(null);
+            return UserDTO.from(userRepository.save(user));
+        }
         LocalDate joinedAt = user.getJoinedAt() != null ? user.getJoinedAt() : LocalDate.now();
         if (expiresAt != null && expiresAt.isBefore(joinedAt)) {
             throw new RuntimeException("만료날짜는 가입날짜보다 빠를 수 없습니다.");
@@ -371,6 +375,9 @@ public class AuthService {
     }
 
     private boolean isAccountExpired(User user) {
+        if (user.getRole() == User.UserRole.ADMIN) {
+            return false;
+        }
         return user.getExpiresAt() != null && !user.getExpiresAt().isAfter(LocalDate.now());
     }
 }
