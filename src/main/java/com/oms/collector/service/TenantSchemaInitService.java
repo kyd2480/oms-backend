@@ -8,10 +8,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPInputStream;
 
 /**
  * 신규 회사(테넌트) 스키마 초기화.
@@ -131,7 +133,7 @@ public class TenantSchemaInitService {
         validateSchemaName(schemaName);
         try {
             Map<String, Object> backup = objectMapper.readValue(
-                file.getInputStream(),
+                openBackupInputStream(file),
                 new TypeReference<>() {}
             );
 
@@ -189,6 +191,14 @@ public class TenantSchemaInitService {
         } catch (Exception e) {
             throw new RuntimeException("복구 실패: " + e.getMessage(), e);
         }
+    }
+
+    private InputStream openBackupInputStream(MultipartFile file) throws Exception {
+        byte[] bytes = file.getBytes();
+        if (bytes.length >= 2 && (bytes[0] == (byte) 0x1f) && (bytes[1] == (byte) 0x8b)) {
+            return new GZIPInputStream(new ByteArrayInputStream(bytes));
+        }
+        return new ByteArrayInputStream(bytes);
     }
 
     // ── private ──────────────────────────────────────────────────────────────
