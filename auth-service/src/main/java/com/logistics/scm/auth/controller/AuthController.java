@@ -12,6 +12,7 @@ import com.logistics.scm.auth.dto.VerificationSendRequest;
 import com.logistics.scm.auth.dto.VerificationSendResponse;
 import com.logistics.scm.auth.service.AuthService;
 import com.logistics.scm.auth.service.MaintenanceService;
+import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class AuthController {
+    private static final String EXPIRED_TOKEN_MESSAGE = "세션이 만료되었습니다. 다시 로그인해주세요.";
 
     private final AuthService authService;
     private final MaintenanceService maintenanceService;
@@ -126,6 +128,8 @@ public class AuthController {
             return isValid
                 ? ResponseEntity.ok(new ValidationResponse(true, "유효한 토큰입니다", username))
                 : ResponseEntity.badRequest().body(new ValidationResponse(false, "유효하지 않은 토큰입니다", null));
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(401).body(new ValidationResponse(false, EXPIRED_TOKEN_MESSAGE, null));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(new ValidationResponse(false, "토큰 검증 실패", null));
         }
@@ -139,6 +143,8 @@ public class AuthController {
             String username = authService.getUsernameFromToken(token);
             String role     = authService.getRoleFromToken(token);
             return ResponseEntity.ok(new CurrentUserResponse(username, role));
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(401).body(Map.of("message", EXPIRED_TOKEN_MESSAGE));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("사용자 정보 조회 실패");
         }
@@ -228,6 +234,8 @@ public class AuthController {
                 .orElseThrow(() -> new RuntimeException("요청 사용자를 찾을 수 없습니다"));
             authService.deleteUser(requester.getUserId(), userId);
             return ResponseEntity.ok(Map.of("message", "사용자가 삭제되었습니다"));
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(401).body(Map.of("message", EXPIRED_TOKEN_MESSAGE));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
@@ -240,6 +248,8 @@ public class AuthController {
             String token = authHeader.replace("Bearer ", "");
             String code  = authService.getCompanyCodeFromToken(token);
             return ResponseEntity.ok(Map.of("companyCode", code));
+        } catch (ExpiredJwtException e) {
+            return ResponseEntity.status(401).body(Map.of("message", EXPIRED_TOKEN_MESSAGE));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("message", "토큰 파싱 실패"));
         }
