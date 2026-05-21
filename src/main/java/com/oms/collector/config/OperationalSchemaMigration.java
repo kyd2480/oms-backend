@@ -78,6 +78,8 @@ public class OperationalSchemaMigration {
         execute("ALTER TABLE orders ALTER COLUMN inspection_completed SET DEFAULT FALSE");
         execute("UPDATE orders SET inspection_completed = FALSE WHERE inspection_completed IS NULL");
         execute("ALTER TABLE orders ALTER COLUMN inspection_completed SET NOT NULL");
+
+        execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_assigned_at TIMESTAMP");
     }
 
     private void migrateOrderItems() {

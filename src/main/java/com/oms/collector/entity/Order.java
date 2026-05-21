@@ -144,6 +144,9 @@ public class Order {
     @Column(name = "inspection_completed", nullable = false)
     @Builder.Default
     private Boolean inspectionCompleted = false;
+
+    @Column(name = "invoice_assigned_at")
+    private LocalDateTime invoiceAssignedAt;
     
     // 날짜
     @Column(name = "ordered_at", nullable = false)

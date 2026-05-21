@@ -643,6 +643,7 @@ public class InvoiceController {
             }
 
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
+            order.setInvoiceAssignedAt(LocalDateTime.now());
             orderRepository.save(order);
 
             log.info("송장 저장: {} → {} {}", orderNo, carrierName, trackingNo);
@@ -674,6 +675,7 @@ public class InvoiceController {
                 if (order == null) { failed++; continue; }
                 if (Boolean.TRUE.equals(order.getShippingHold())) { failed++; continue; }
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName, trackingNo, null, null, null, null, null, null, null));
+                order.setInvoiceAssignedAt(LocalDateTime.now());
                 orderRepository.save(order);
                 saved++;
             } catch (Exception e) { failed++; }
@@ -757,6 +759,7 @@ public class InvoiceController {
             order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
                 result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd(),
                 result.deliveryAreaCode(), result.arrivalCenterName(), result.deliveryPostOfficeName(), result.deliveryCourseNo()));
+            order.setInvoiceAssignedAt(LocalDateTime.now());
             orderRepository.save(order);
 
             String trackingNo = result.trackingNo();
@@ -823,6 +826,7 @@ public class InvoiceController {
                 order.setDeliveryMemo(buildDeliveryMemo(order.getDeliveryMemo(), carrierCode, carrierName,
                     result.trackingNo(), result.poReqNo(), result.reservationNo(), result.reqYmd(),
                     result.deliveryAreaCode(), result.arrivalCenterName(), result.deliveryPostOfficeName(), result.deliveryCourseNo()));
+                order.setInvoiceAssignedAt(LocalDateTime.now());
                 orderRepository.save(order);
                 assigned++;
             } catch (IllegalArgumentException | IllegalStateException e) {
@@ -986,6 +990,7 @@ public class InvoiceController {
             cancelCarrierInvoiceIfNeeded(order);
             order.setDeliveryMemo(removeInvoiceFromMemo(order.getDeliveryMemo()));
             order.setInspectionCompleted(false);
+            order.setInvoiceAssignedAt(null);
             orderRepository.save(order);
             log.info("송장삭제: {}", orderNo);
             return ResponseEntity.ok(Map.of("success", true, "message", "송장 삭제 완료"));

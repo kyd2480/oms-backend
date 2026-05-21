@@ -108,7 +108,9 @@ public class CsOrderController {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
         @RequestParam(required = false, defaultValue = "ordered") String dateType,
         @RequestParam(required = false, defaultValue = "통합검색") String searchType,
-        @RequestParam(required = false) String keyword
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime invoiceAssignedFrom,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime invoiceAssignedTo
     ) {
         LocalDateTime start = (startDate != null ? startDate : LocalDate.now().minusWeeks(1)).atStartOfDay();
         LocalDateTime end   = (endDate   != null ? endDate   : LocalDate.now()).atTime(23, 59, 59);
@@ -144,6 +146,10 @@ public class CsOrderController {
             if (hasKeyword) orders = filterByKeyword(orders, searchType, kw);
         }
 
+        if (invoiceAssignedFrom != null || invoiceAssignedTo != null) {
+            orders = filterByInvoiceAssignedRange(orders, invoiceAssignedFrom, invoiceAssignedTo);
+        }
+
         // 정렬
         orders.sort((a, b) -> {
             LocalDateTime da = isShippedDate ? a.getUpdatedAt() : a.getOrderedAt();
@@ -166,6 +172,18 @@ public class CsOrderController {
                 return target != null
                     && !target.isBefore(start)
                     && !target.isAfter(end);
+            })
+            .collect(Collectors.toList());
+    }
+
+    private List<Order> filterByInvoiceAssignedRange(List<Order> orders, LocalDateTime from, LocalDateTime to) {
+        return orders.stream()
+            .filter(o -> {
+                LocalDateTime assignedAt = o.getInvoiceAssignedAt();
+                if (assignedAt == null) return false;
+                if (from != null && assignedAt.isBefore(from)) return false;
+                if (to != null && assignedAt.isAfter(to)) return false;
+                return true;
             })
             .collect(Collectors.toList());
     }
