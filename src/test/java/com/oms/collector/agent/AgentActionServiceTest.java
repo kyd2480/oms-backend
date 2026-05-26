@@ -6,6 +6,9 @@ import com.oms.collector.controller.CancelController;
 import com.oms.collector.controller.CsMemoController;
 import com.oms.collector.controller.InvoiceController;
 import com.oms.collector.controller.StockMatchingController;
+import com.oms.collector.repository.OrderRepository;
+import com.oms.collector.repository.PrintTypeRepository;
+import com.oms.collector.service.SabangnetOrderCollectionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,12 +25,16 @@ class AgentActionServiceTest {
     @Mock private CancelController cancelController;
     @Mock private StockMatchingController stockMatchingController;
     @Mock private CsMemoController csMemoController;
+    @Mock private SabangnetOrderCollectionService sabangnetOrderCollectionService;
+    @Mock private OrderRepository orderRepository;
+    @Mock private PrintTypeRepository printTypeRepository;
 
     @Test
     @DisplayName("송장번호 부여 문장은 송장 자동부여 제안으로 해석된다")
     void invoiceAssignPhraseIsRecognized() {
         AgentActionService service = new AgentActionService(
-            invoiceController, allocationController, cancelController, stockMatchingController, csMemoController
+            invoiceController, allocationController, cancelController, stockMatchingController, csMemoController,
+            sabangnetOrderCollectionService, orderRepository, printTypeRepository
         );
 
         AgentActionProposal proposal = service.propose("OMS-20260330-0434 송장번호 부여해줘", "관리자");
@@ -41,7 +48,8 @@ class AgentActionServiceTest {
     @DisplayName("창고 변경 문장은 할당 창고 변경 제안으로 해석된다")
     void warehouseChangePhraseIsRecognized() {
         AgentActionService service = new AgentActionService(
-            invoiceController, allocationController, cancelController, stockMatchingController, csMemoController
+            invoiceController, allocationController, cancelController, stockMatchingController, csMemoController,
+            sabangnetOrderCollectionService, orderRepository, printTypeRepository
         );
 
         AgentActionProposal proposal = service.propose("할당 창고를 ANYANG으로 설정해줘", "관리자");

@@ -117,7 +117,7 @@ public class OmsAgentToolService {
                 "customerName", nullable(o.getCustomerName()),
                 "orderedAt", o.getOrderedAt() != null ? o.getOrderedAt().toString() : "",
                 "productSummary", summarizeItems(o),
-                "invoiceEntered", o.getDeliveryMemo() != null && o.getDeliveryMemo().startsWith("INVOICE:")
+                "invoiceEntered", o.getDeliveryMemo() != null && o.getDeliveryMemo().contains("INVOICE:")
             ))
             .toList();
 
@@ -157,6 +157,37 @@ public class OmsAgentToolService {
             "reservedStock", reservedStock,
             "outOfStockCount", outOfStock.size(),
             "riskProducts", riskProducts
+        );
+    }
+
+    public Map<String, Object> getInvoicePendingOverview() {
+        long pending = orderRepository.countInvoicePendingOrders();
+        long assigned = orderRepository.countInvoiceAssignedOrders();
+        return Map.of(
+            "invoicePendingOrders", pending,
+            "invoiceAssignedOrders", assigned,
+            "totalConfirmedOrders", pending + assigned
+        );
+    }
+
+    public Map<String, Object> getOperationalStatusOverview() {
+        long invoicePending = orderRepository.countInvoicePendingOrders();
+        long inspectionWaiting = orderRepository.countInvoiceAssignedOrders();
+        long confirmedOrders = orderRepository.countByOrderStatus(Order.OrderStatus.CONFIRMED);
+        long shippedOrders = orderRepository.countByOrderStatus(Order.OrderStatus.SHIPPED);
+        long deliveredOrders = orderRepository.countByOrderStatus(Order.OrderStatus.DELIVERED);
+
+        return Map.of(
+            "pendingOrders", orderRepository.countByOrderStatus(Order.OrderStatus.PENDING),
+            "unmatchedItems", safeLong(orderRepository.countPendingUnmatched()),
+            "allocatedItems", orderRepository.countConfirmedAllocatedItems(),
+            "allocatedOrders", confirmedOrders,
+            "invoicePendingOrders", invoicePending,
+            "inspectionWaitingOrders", inspectionWaiting,
+            "shippedOrders", shippedOrders,
+            "deliveredOrders", deliveredOrders,
+            "cancelledOrders", orderRepository.countByOrderStatus(Order.OrderStatus.CANCELLED),
+            "shippingHoldOrders", orderRepository.countByShippingHoldTrue()
         );
     }
 
@@ -392,6 +423,8 @@ public class OmsAgentToolService {
                 intArg(args, "limit", 10)
             );
             case "get_inventory_overview" -> getInventoryOverview();
+            case "get_invoice_pending_overview" -> getInvoicePendingOverview();
+            case "get_operational_status_overview" -> getOperationalStatusOverview();
             case "search_products" -> searchProducts(
                 stringArg(args, "keyword", ""),
                 intArg(args, "limit", 10)
@@ -445,6 +478,10 @@ public class OmsAgentToolService {
 
     private int safeInt(Integer value) {
         return value != null ? value : 0;
+    }
+
+    private long safeLong(Long value) {
+        return value != null ? value : 0L;
     }
 
     private int intArg(Map<String, Object> args, String key, int defaultValue) {

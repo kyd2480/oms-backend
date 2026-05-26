@@ -197,6 +197,8 @@ public class AgentExportService {
             case "get_shipment_stats" -> "출고 현황 조회";
             case "get_claim_overview" -> "반품/교환 현황 조회";
             case "get_inventory_overview" -> "재고 현황 조회";
+            case "get_invoice_pending_overview" -> "송장입력대기 조회";
+            case "get_operational_status_overview" -> "운영 상태 조회";
             case "search_products" -> "상품 검색";
             case "get_top_products_by_channel" -> "판매처 인기 상품 조회";
             default -> name;
@@ -247,6 +249,15 @@ public class AgentExportService {
             case "availableStock" -> "사용 가능 재고";
             case "reservedStock" -> "예약 재고";
             case "outOfStockCount" -> "품절 상품 수";
+            case "invoicePendingOrders" -> "송장입력대기";
+            case "invoiceAssignedOrders" -> "송장 발급완료";
+            case "totalConfirmedOrders" -> "송장출력 대상 전체";
+            case "unmatchedItems" -> "미매칭 상품";
+            case "allocatedItems" -> "재고 할당 완료 항목";
+            case "allocatedOrders" -> "재고 할당 완료 주문";
+            case "inspectionWaitingOrders" -> "검수대기 주문";
+            case "deliveredOrders" -> "배송 완료 주문";
+            case "shippingHoldOrders" -> "보류 주문";
             case "riskProducts" -> "위험 상품";
             case "products" -> "상품 목록";
             case "orderCount" -> "주문 건수";

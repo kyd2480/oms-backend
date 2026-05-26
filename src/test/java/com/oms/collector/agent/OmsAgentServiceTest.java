@@ -159,6 +159,49 @@ class OmsAgentServiceTest {
     }
 
     @Test
+    @DisplayName("송장입력대기 건수 질문은 전체 미발급 건수를 응답한다")
+    void invoicePendingCountCase() {
+        when(toolService.getOperationalStatusOverview()).thenReturn(Map.of(
+            "invoicePendingOrders", 17,
+            "inspectionWaitingOrders", 8,
+            "unmatchedItems", 3,
+            "allocatedItems", 25,
+            "allocatedOrders", 12,
+            "shippedOrders", 5
+        ));
+
+        AgentChatResponse response = service.chat(request("송장입력대기중인 주문건이 몇건이야?"));
+
+        assertThat(response.answer()).contains("송장입력대기 주문은 17건입니다.");
+        assertThat(response.answer()).doesNotContain("status").doesNotContain("cancel");
+        assertThat(response.toolCalls().get(0).get("name")).isEqualTo("get_operational_status_overview");
+    }
+
+    @Test
+    @DisplayName("운영 상태 건수 질문은 직접 처리로 응답한다")
+    void operationalStatusCountCase() {
+        when(toolService.getOperationalStatusOverview()).thenReturn(Map.of(
+            "invoicePendingOrders", 17,
+            "inspectionWaitingOrders", 8,
+            "unmatchedItems", 3,
+            "allocatedItems", 25,
+            "allocatedOrders", 12,
+            "shippedOrders", 5
+        ));
+
+        AgentChatResponse unmatched = service.chat(request("미매칭건 몇건이야?"));
+        assertThat(unmatched.answer()).contains("미매칭 상품은 3건입니다.");
+        assertThat(unmatched.toolCalls().get(0).get("name")).isEqualTo("get_operational_status_overview");
+
+        AgentChatResponse inspection = service.chat(request("검수대기 몇 건이야?"));
+        assertThat(inspection.answer()).contains("검수대기 주문은 8건입니다.");
+
+        AgentChatResponse allocated = service.chat(request("재고할당 완료건 몇개야?"));
+        assertThat(allocated.answer()).contains("재고 할당 완료 항목은 25건입니다.");
+        assertThat(allocated.answer()).contains("할당 완료 주문: 12건");
+    }
+
+    @Test
     @DisplayName("실행 요청은 조회 없이도 실행 제안을 응답에 포함한다")
     void directQueryIncludesActionProposal() {
         when(agentActionService.propose(anyString(), anyString())).thenReturn(

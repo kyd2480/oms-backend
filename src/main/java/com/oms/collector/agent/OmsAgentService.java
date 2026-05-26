@@ -174,6 +174,10 @@ public class OmsAgentService {
                 warnings.add("모델 응답이 비어 있어 기본 메시지로 대체했습니다.");
                 answer = fallbackAnswer(request.message(), toolCalls);
             }
+            if (looksLikeRawJson(answer)) {
+                warnings.add("모델이 내부 JSON 형식으로 응답해 기본 안내로 대체했습니다.");
+                answer = fallbackAnswer(request.message(), toolCalls);
+            }
 
             log.info("Agent request completed: toolCalls={}", toolCalls.size());
             return new AgentChatResponse(true, answer, model, true, proposedAction, toolCalls, warnings);
@@ -325,6 +329,28 @@ public class OmsAgentService {
                 """
         ));
         tools.add(functionTool(
+            "get_invoice_pending_overview",
+            "송장 입력 대기 또는 송장 미발급 주문 건수를 조회한다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+                """
+        ));
+        tools.add(functionTool(
+            "get_operational_status_overview",
+            "미매칭, 재고 할당 완료, 송장 입력 대기, 검수 대기, 발송 완료 등 운영 상태별 건수를 조회한다.",
+            """
+                {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+                """
+        ));
+        tools.add(functionTool(
             "search_products",
             "상품명, SKU, 바코드 기준으로 상품을 조회한다.",
             """
@@ -403,6 +429,8 @@ public class OmsAgentService {
                 args.has("limit") ? args.path("limit").asInt(10) : 10
             );
             case "get_inventory_overview" -> toolService.getInventoryOverview();
+            case "get_invoice_pending_overview" -> toolService.getInvoicePendingOverview();
+            case "get_operational_status_overview" -> toolService.getOperationalStatusOverview();
             case "search_products" -> toolService.searchProducts(
                 args.path("keyword").asText(""),
                 args.has("limit") ? args.path("limit").asInt(10) : 10
@@ -493,6 +521,28 @@ public class OmsAgentService {
         return value == null || value.isBlank();
     }
 
+    private boolean looksLikeRawJson(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return (trimmed.startsWith("{") && trimmed.endsWith("}"))
+            || (trimmed.startsWith("[") && trimmed.endsWith("]"));
+    }
+
+    private boolean isOperationalStatusCountQuestion(String message) {
+        if (!containsAny(message,
+            "미매칭", "상품 미매칭", "매칭대기", "매칭 대기",
+            "재고할당", "재고 할당", "할당완료", "할당 완료",
+            "송장입력대기", "송장 입력 대기", "송장대기", "송장 대기", "송장 미발급", "미발급", "송장 미입력",
+            "검수대기", "검수 대기", "발송대기", "발송 대기",
+            "발송완료", "발송 완료", "출고완료", "출고 완료",
+            "보류", "작업 현황", "운영 현황", "처리 현황")) {
+            return false;
+        }
+        return containsAny(message, "몇건", "몇 건", "건수", "몇개", "몇 개", "얼마", "현황", "조회", "알려", "요약");
+    }
+
     private AgentChatResponse handleDirectQuery(AgentChatRequest request, List<String> warnings, AgentActionProposal proposedAction) {
         String message = request.message() != null ? request.message().toLowerCase(Locale.ROOT) : "";
         List<Map<String, Object>> toolCalls = new ArrayList<>();
@@ -511,10 +561,17 @@ public class OmsAgentService {
             return new AgentChatResponse(true, appendActionGuide(formatRecentOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
-        if (containsAny(message, "송장 미입력", "송장 없는", "송장 누락", "송장 안 들어간")) {
+        if (containsAny(message, "송장 미입력", "송장 없는", "송장 누락", "송장 안 들어간") &&
+            !containsAny(message, "몇건", "몇 건", "건수", "몇개", "몇 개", "얼마")) {
             Map<String, Object> result = toolService.searchOrders("", "CONFIRMED", 20);
             toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "CONFIRMED", "limit", 20)));
             return new AgentChatResponse(true, appendActionGuide(formatInvoiceMissingOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        if (isOperationalStatusCountQuestion(message)) {
+            Map<String, Object> result = toolService.getOperationalStatusOverview();
+            toolCalls.add(Map.of("name", "get_operational_status_overview", "arguments", Map.of()));
+            return new AgentChatResponse(true, formatOperationalStatusAnswer(message, result), model, true, proposedAction, toolCalls, warnings);
         }
 
         ClaimOverviewRequest claimOverviewRequest = parseClaimOverviewRequest(message);
@@ -1118,6 +1175,56 @@ public class OmsAgentService {
             .orElse("");
 
         return "송장 미입력 주문 상위 %s건입니다.\n%s".formatted(missing.size(), lines);
+    }
+
+    private String formatInvoicePendingOverview(Map<String, Object> result) {
+        return """
+            송장입력대기 주문은 %s건입니다.
+            - 기준: 보류 제외, CONFIRMED 상태, 송장번호 미발급
+            - 송장 발급완료: %s건
+            - 송장출력 대상 전체: %s건
+            """.formatted(
+            result.getOrDefault("invoicePendingOrders", 0),
+            result.getOrDefault("invoiceAssignedOrders", 0),
+            result.getOrDefault("totalConfirmedOrders", 0)
+        ).trim();
+    }
+
+    private String formatOperationalStatusAnswer(String message, Map<String, Object> result) {
+        List<String> lines = new ArrayList<>();
+
+        if (containsAny(message, "미매칭", "상품 미매칭", "매칭대기", "매칭 대기")) {
+            lines.add("미매칭 상품은 " + result.getOrDefault("unmatchedItems", 0) + "건입니다.");
+        }
+        if (containsAny(message, "재고할당", "재고 할당", "할당완료", "할당 완료")) {
+            lines.add("재고 할당 완료 항목은 " + result.getOrDefault("allocatedItems", 0) + "건입니다.");
+            lines.add("- 할당 완료 주문: " + result.getOrDefault("allocatedOrders", 0) + "건");
+        }
+        if (containsAny(message, "송장입력대기", "송장 입력 대기", "송장대기", "송장 대기", "송장 미발급", "미발급", "송장 미입력")) {
+            lines.add("송장입력대기 주문은 " + result.getOrDefault("invoicePendingOrders", 0) + "건입니다.");
+        }
+        if (containsAny(message, "검수대기", "검수 대기", "발송대기", "발송 대기")) {
+            lines.add("검수대기 주문은 " + result.getOrDefault("inspectionWaitingOrders", 0) + "건입니다.");
+        }
+        if (containsAny(message, "발송완료", "발송 완료", "출고완료", "출고 완료")) {
+            lines.add("발송 완료 주문은 " + result.getOrDefault("shippedOrders", 0) + "건입니다.");
+        }
+        if (containsAny(message, "보류")) {
+            lines.add("보류 주문은 " + result.getOrDefault("shippingHoldOrders", 0) + "건입니다.");
+        }
+
+        if (lines.isEmpty() || containsAny(message, "작업 현황", "운영 현황", "처리 현황", "전체", "요약")) {
+            lines = List.of(
+                "현재 운영 상태입니다.",
+                "- 미매칭 상품: " + result.getOrDefault("unmatchedItems", 0) + "건",
+                "- 재고 할당 완료: " + result.getOrDefault("allocatedItems", 0) + "건",
+                "- 송장입력대기: " + result.getOrDefault("invoicePendingOrders", 0) + "건",
+                "- 검수대기: " + result.getOrDefault("inspectionWaitingOrders", 0) + "건",
+                "- 발송 완료: " + result.getOrDefault("shippedOrders", 0) + "건"
+            );
+        }
+
+        return String.join("\n", lines);
     }
 
     @SuppressWarnings("unchecked")

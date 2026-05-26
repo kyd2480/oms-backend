@@ -39,9 +39,38 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     long countByShippingHoldTrue();
 
+    long countByOrderStatus(Order.OrderStatus orderStatus);
+
     long countByMarketSyncStatus(Order.MarketSyncStatus marketSyncStatus);
 
     long countByOrderStatusAndInspectionCompletedFalse(Order.OrderStatus orderStatus);
+
+    @Query("""
+        SELECT COUNT(o)
+        FROM Order o
+        WHERE o.orderStatus = 'CONFIRMED'
+          AND COALESCE(o.shippingHold, false) = false
+          AND (o.deliveryMemo IS NULL OR o.deliveryMemo NOT LIKE '%INVOICE:%')
+        """)
+    long countInvoicePendingOrders();
+
+    @Query("""
+        SELECT COUNT(o)
+        FROM Order o
+        WHERE o.orderStatus = 'CONFIRMED'
+          AND COALESCE(o.shippingHold, false) = false
+          AND o.deliveryMemo LIKE '%INVOICE:%'
+        """)
+    long countInvoiceAssignedOrders();
+
+    @Query(value = """
+        SELECT COUNT(*)
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.order_id
+        WHERE o.order_status = 'CONFIRMED'
+          AND GREATEST(oi.quantity - COALESCE(oi.cancelled_quantity, 0), 0) > 0
+        """, nativeQuery = true)
+    long countConfirmedAllocatedItems();
 
     List<Order> findTop10ByShippingHoldTrueOrderByUpdatedAtDesc();
 
