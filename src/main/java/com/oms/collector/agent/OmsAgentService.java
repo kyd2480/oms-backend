@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
 public class OmsAgentService {
 
     private static final String RESPONSES_API = "https://api.openai.com/v1/responses";
-    private static final Duration OPENAI_TIMEOUT = Duration.ofSeconds(45);
+    private static final long DEFAULT_OPENAI_TIMEOUT_SECONDS = 90;
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
     private static final Pattern DATE_PATTERN = Pattern.compile("(20\\d{2})[.\\-/년\\s]+(\\d{1,2})[.\\-/월\\s]+(\\d{1,2})");
@@ -71,6 +71,18 @@ public class OmsAgentService {
 
     @Value("${openai.agent.enabled:true}")
     private boolean agentEnabled;
+
+    @Value("${openai.timeout-seconds:" + DEFAULT_OPENAI_TIMEOUT_SECONDS + "}")
+    private long openaiTimeoutSeconds;
+
+    @Value("${openai.max-output-tokens:500}")
+    private int maxOutputTokens;
+
+    @Value("${openai.reasoning-effort:minimal}")
+    private String reasoningEffort;
+
+    @Value("${openai.text-verbosity:low}")
+    private String textVerbosity;
 
     public AgentChatResponse chat(AgentChatRequest request) {
         List<String> warnings = new ArrayList<>();
@@ -115,8 +127,9 @@ public class OmsAgentService {
             );
         }
 
+        Duration openaiTimeout = openAiTimeout();
         HttpClient httpClient = HttpClient.create()
-            .responseTimeout(OPENAI_TIMEOUT);
+            .responseTimeout(openaiTimeout);
 
         WebClient client = WebClient.builder()
             .clientConnector(new ReactorClientHttpConnector(httpClient))
@@ -126,7 +139,7 @@ public class OmsAgentService {
 
         try {
             log.info("Agent request started: user={}, model={}", request.userName(), model);
-            JsonNode response = createResponse(client, buildInitialPayload(request));
+            JsonNode response = createResponse(client, buildInitialPayload(request), openaiTimeout);
             for (int i = 0; i < 6 && hasFunctionCalls(response); i++) {
                 log.info("Agent tool round {} started", i + 1);
                 ArrayNode toolOutputs = objectMapper.createArrayNode();
@@ -152,7 +165,8 @@ public class OmsAgentService {
                 nextPayload.put("previous_response_id", response.path("id").asText());
                 nextPayload.put("instructions", SYSTEM_PROMPT);
                 nextPayload.set("input", toolOutputs);
-                response = createResponse(client, nextPayload);
+                applyResponseTuning(nextPayload);
+                response = createResponse(client, nextPayload, openaiTimeout);
             }
 
             String answer = extractText(response);
@@ -179,17 +193,17 @@ public class OmsAgentService {
         } catch (Exception e) {
             log.error("Agent chat failed", e);
             warnings.add("에이전트 처리 중 예외가 발생했습니다.");
-            return new AgentChatResponse(false, "에이전트 처리 중 오류가 발생했습니다: " + e.getMessage(), model, true, null, toolCalls, warnings);
+            return new AgentChatResponse(false, formatAgentExceptionMessage(e), model, true, null, toolCalls, warnings);
         }
     }
 
-    private JsonNode createResponse(WebClient client, ObjectNode payload) {
+    private JsonNode createResponse(WebClient client, ObjectNode payload, Duration timeout) {
         return client.post()
             .uri(RESPONSES_API)
             .bodyValue(payload)
             .retrieve()
             .bodyToMono(JsonNode.class)
-            .timeout(OPENAI_TIMEOUT)
+            .timeout(timeout)
             .block();
     }
 
@@ -197,10 +211,38 @@ public class OmsAgentService {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("model", model);
         payload.put("instructions", SYSTEM_PROMPT);
-        payload.put("max_output_tokens", 900);
+        applyResponseTuning(payload);
         payload.set("input", objectMapper.getNodeFactory().textNode(buildTranscript(request)));
         payload.set("tools", buildTools());
         return payload;
+    }
+
+    private void applyResponseTuning(ObjectNode payload) {
+        payload.put("max_output_tokens", Math.max(200, Math.min(maxOutputTokens, 1200)));
+
+        if (!blank(reasoningEffort)) {
+            ObjectNode reasoning = objectMapper.createObjectNode();
+            reasoning.put("effort", reasoningEffort.trim());
+            payload.set("reasoning", reasoning);
+        }
+
+        if (!blank(textVerbosity)) {
+            ObjectNode text = objectMapper.createObjectNode();
+            text.put("verbosity", textVerbosity.trim());
+            payload.set("text", text);
+        }
+    }
+
+    private Duration openAiTimeout() {
+        return Duration.ofSeconds(Math.max(30, Math.min(openaiTimeoutSeconds, 180)));
+    }
+
+    private String formatAgentExceptionMessage(Exception e) {
+        String message = e.getMessage() != null ? e.getMessage() : "";
+        if (message.contains("TimeoutException") || message.contains("Did not observe any item")) {
+            return "OpenAI 응답 시간이 초과되었습니다. 잠시 후 다시 시도하거나 질문을 더 짧게 입력해 주세요.";
+        }
+        return "에이전트 처리 중 오류가 발생했습니다: " + message;
     }
 
     private ArrayNode buildTools() {
