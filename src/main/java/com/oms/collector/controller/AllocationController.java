@@ -247,6 +247,9 @@ public class AllocationController {
         return ResponseEntity.ok(Map.of(
             "success", true,
             "message", "재고 차감 및 발송 처리 완료",
+            "orderNo", order.getOrderNo(),
+            "orderStatus", order.getOrderStatus().name(),
+            "inspectionCompleted", order.getInspectionCompleted(),
             "workType", workType,
             "marketSyncSuccess", syncResult.success(),
             "marketSyncMessage", syncResult.message()

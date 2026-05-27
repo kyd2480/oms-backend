@@ -291,6 +291,41 @@ public class InvoiceController {
         }
     }
 
+    public static class ShippedSummaryDTO {
+        public String orderNo;
+        public String channelName;
+        public String recipientName;
+        public String productName;
+        public int quantity;
+        public String shippedAt;
+        public String carrierCode;
+        public String carrierName;
+        public String trackingNo;
+
+        public ShippedSummaryDTO(Order order) {
+            this.orderNo = order.getOrderNo();
+            this.channelName = order.getChannel() != null ? order.getChannel().getChannelName() : "";
+            this.recipientName = order.getRecipientName();
+            this.productName = order.getItems().isEmpty() ? "" : order.getItems().stream()
+                .filter(item -> item.getActiveQuantity() > 0)
+                .map(item -> formatProductLabel(item.getProductName(), item.getOptionName()))
+                .collect(Collectors.joining(", "));
+            this.quantity = order.getItems().stream().mapToInt(OrderItem::getActiveQuantity).sum();
+            this.shippedAt = order.getUpdatedAt() != null ? order.getUpdatedAt().toString() : "";
+            InvoiceInfo invoiceInfo = extractInvoiceInfo(order.getDeliveryMemo());
+            this.carrierCode = invoiceInfo != null ? Objects.toString(invoiceInfo.carrierCode(), "") : "";
+            this.carrierName = invoiceInfo != null ? Objects.toString(invoiceInfo.carrierName(), "") : "";
+            this.trackingNo = invoiceInfo != null ? Objects.toString(invoiceInfo.trackingNo(), "") : "";
+        }
+
+        private static String formatProductLabel(String productName, String optionName) {
+            if (optionName == null || optionName.isBlank()) {
+                return productName != null ? productName : "";
+            }
+            return Objects.toString(productName, "") + " / " + optionName;
+        }
+    }
+
     private static String extractInvoiceSegment(String memo) {
         if (memo == null || memo.isBlank()) {
             return null;
@@ -862,11 +897,12 @@ public class InvoiceController {
      */
     @GetMapping("/shipped")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<InvoiceOrderDTO>> getShipped(
+    public ResponseEntity<List<?>> getShipped(
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "200") int size,
         @RequestParam(required = false) String startDate,
-        @RequestParam(required = false) String endDate
+        @RequestParam(required = false) String endDate,
+        @RequestParam(defaultValue = "false") boolean summary
     ) {
         List<Order> orders;
         if (startDate != null && endDate != null) {
@@ -882,6 +918,12 @@ public class InvoiceController {
             o.getItems().size();
             if (o.getChannel() != null) o.getChannel().getChannelName();
         });
+
+        if (summary) {
+            return ResponseEntity.ok(orders.stream()
+                .map(ShippedSummaryDTO::new)
+                .collect(Collectors.toList()));
+        }
 
         Map<String, Product> productMap = getInvoiceProductMap();
         String fullSenderAddress = buildSenderAddress();
@@ -910,7 +952,14 @@ public class InvoiceController {
         }
 
         order.getItems().size();
-        cancelCarrierInvoiceIfNeeded(order);
+        String carrierCancelMessage = "";
+        try {
+            cancelCarrierInvoiceIfNeeded(order);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            carrierCancelMessage = Objects.toString(e.getMessage(), "운송사 송장취소 실패");
+            log.warn("발송취소: 운송사 송장취소 실패, 로컬 롤백은 계속 진행합니다. orderNo={}, reason={}",
+                orderNo, e.getMessage());
+        }
 
         // 발송 시 사용된 창고 코드
         String warehouseCode = AllocationController.getCurrentWarehouseCode();
@@ -918,8 +967,17 @@ public class InvoiceController {
             log.warn("발송취소: 창고 코드 없음 — 재고 복구 없이 상태만 롤백 ({})", orderNo);
         }
 
-        // 상품 캐시 로딩
-        List<Product> allProducts = productRepository.findAll();
+        List<String> productCodes = order.getItems().stream()
+            .map(OrderItem::getProductCode)
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .filter(code -> !code.isBlank())
+            .map(String::toLowerCase)
+            .distinct()
+            .collect(Collectors.toList());
+        List<Product> allProducts = productCodes.isEmpty()
+            ? List.of()
+            : productRepository.findBySkuOrBarcodeInLowercase(productCodes);
         Map<String, Product> skuMap     = new HashMap<>();
         Map<String, Product> barcodeMap = new HashMap<>();
         allProducts.forEach(p -> {
@@ -937,7 +995,7 @@ public class InvoiceController {
                 : barcodeMap.get(code.toLowerCase());
             if (product == null) continue;
 
-            int qty = item.getQuantity() != null ? item.getQuantity() : 0;
+            int qty = item.getActiveQuantity();
             if (qty <= 0) continue;
 
             try {
@@ -974,7 +1032,8 @@ public class InvoiceController {
         return ResponseEntity.ok(Map.of(
             "success",  true,
             "message",  "발송취소 완료 (재고 " + restored + "건 복구)",
-            "restored", restored
+            "restored", restored,
+            "carrierCancelMessage", carrierCancelMessage
         ));
     }
 
