@@ -161,6 +161,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
            "WHERE (:status IS NULL OR o.orderStatus = :status) " +
            "AND (:keyword IS NULL OR :keyword = '' " +
            "     OR LOWER(o.orderNo) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "     OR LOWER(o.channelOrderNo) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "     OR LOWER(o.deliveryMemo) LIKE LOWER(CONCAT('%TRACKING:', :keyword, '%')) " +
            "     OR LOWER(o.recipientName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
            "     OR LOWER(o.customerName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
            "     OR LOWER(c.channelName) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +

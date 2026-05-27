@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 public class OmsAgentToolService {
 
     private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
+    private static final String INVOICE_PREFIX = "INVOICE:";
 
     private final OrderRepository orderRepository;
     private final PrintTypeRepository printTypeRepository;
@@ -109,16 +110,22 @@ public class OmsAgentToolService {
         List<Order> orders = orderRepository.searchForAgent(keyword, orderStatus, PageRequest.of(0, safeLimit, Sort.by(Sort.Direction.DESC, "orderedAt")));
 
         List<Map<String, Object>> items = orders.stream()
-            .map(o -> Map.<String, Object>of(
-                "orderNo", o.getOrderNo(),
-                "status", o.getOrderStatus().name(),
-                "channelName", o.getChannel() != null ? o.getChannel().getChannelName() : "",
-                "recipientName", nullable(o.getRecipientName()),
-                "customerName", nullable(o.getCustomerName()),
-                "orderedAt", o.getOrderedAt() != null ? o.getOrderedAt().toString() : "",
-                "productSummary", summarizeItems(o),
-                "invoiceEntered", o.getDeliveryMemo() != null && o.getDeliveryMemo().contains("INVOICE:")
-            ))
+            .map(o -> {
+                InvoiceInfo invoice = extractInvoiceInfo(o.getDeliveryMemo());
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("orderNo", o.getOrderNo());
+                row.put("status", o.getOrderStatus().name());
+                row.put("channelName", o.getChannel() != null ? o.getChannel().getChannelName() : "");
+                row.put("recipientName", nullable(o.getRecipientName()));
+                row.put("customerName", nullable(o.getCustomerName()));
+                row.put("orderedAt", o.getOrderedAt() != null ? o.getOrderedAt().toString() : "");
+                row.put("productSummary", summarizeItems(o));
+                row.put("invoiceEntered", invoice != null);
+                row.put("carrierCode", invoice != null ? nullable(invoice.carrierCode()) : "");
+                row.put("carrierName", invoice != null ? nullable(invoice.carrierName()) : "");
+                row.put("trackingNo", invoice != null ? nullable(invoice.trackingNo()) : "");
+                return row;
+            })
             .toList();
 
         return Map.of(
@@ -527,6 +534,37 @@ public class OmsAgentToolService {
     private String nullable(String value) {
         return value != null ? value : "";
     }
+
+    private InvoiceInfo extractInvoiceInfo(String memo) {
+        if (memo == null || memo.isBlank()) {
+            return null;
+        }
+        int invoiceIndex = memo.indexOf(INVOICE_PREFIX);
+        if (invoiceIndex < 0) {
+            return null;
+        }
+
+        String carrierCode = "";
+        String carrierName = "";
+        String trackingNo = "";
+        String invoiceSegment = memo.substring(invoiceIndex + INVOICE_PREFIX.length());
+        for (String part : invoiceSegment.split("\\|")) {
+            String[] kv = part.split("=", 2);
+            if (kv.length != 2) {
+                continue;
+            }
+            switch (kv[0]) {
+                case "CARRIER" -> carrierCode = kv[1];
+                case "CARRIER_NAME" -> carrierName = kv[1];
+                case "TRACKING" -> trackingNo = kv[1];
+                default -> {
+                }
+            }
+        }
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
+    }
+
+    private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
 
     private static class ProductSummary {
         private int quantity;

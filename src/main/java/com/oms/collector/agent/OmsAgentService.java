@@ -44,6 +44,7 @@ public class OmsAgentService {
     private static final DateTimeFormatter DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final ZoneId OMS_ZONE = ZoneId.of("Asia/Seoul");
     private static final Pattern DATE_PATTERN = Pattern.compile("(20\\d{2})[.\\-/년\\s]+(\\d{1,2})[.\\-/월\\s]+(\\d{1,2})");
+    private static final Pattern ORDER_TOKEN_PATTERN = Pattern.compile("(?i)(oms[-_]?\\d{6,}(?:[-_]?\\d+)?|[a-z]{2,}[-_][a-z0-9_-]*\\d[a-z0-9_-]*|\\d{6,})");
     private static final String SYSTEM_PROMPT = """
         너는 OMS 운영 도우미다.
         목표는 한국어로 짧고 실무적으로 답하는 것이다.
@@ -270,7 +271,7 @@ public class OmsAgentService {
         ));
         tools.add(functionTool(
             "search_orders",
-            "주문번호, 수취인, 고객명, 판매처명으로 주문을 조회한다. status는 ALL 또는 PENDING, CONFIRMED, SHIPPED, CANCELLED를 사용한다.",
+            "주문번호, 송장번호, 수취인, 고객명, 판매처명으로 주문을 조회한다. 결과에는 송장번호(trackingNo)와 택배사(carrierName)가 포함된다. status는 ALL 또는 PENDING, CONFIRMED, SHIPPED, CANCELLED를 사용한다.",
             """
                 {
                   "type": "object",
@@ -559,6 +560,13 @@ public class OmsAgentService {
             Map<String, Object> result = toolService.searchOrders("", "ALL", 10);
             toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", "", "status", "ALL", "limit", 10)));
             return new AgentChatResponse(true, appendActionGuide(formatRecentOrders(result), proposedAction), model, true, proposedAction, toolCalls, warnings);
+        }
+
+        String invoiceOrderKeyword = extractInvoiceOrderKeyword(message);
+        if (invoiceOrderKeyword != null) {
+            Map<String, Object> result = toolService.searchOrders(invoiceOrderKeyword, "ALL", 5);
+            toolCalls.add(Map.of("name", "search_orders", "arguments", Map.of("keyword", invoiceOrderKeyword, "status", "ALL", "limit", 5)));
+            return new AgentChatResponse(true, appendActionGuide(formatOrderInvoiceResult(invoiceOrderKeyword, result), proposedAction), model, true, proposedAction, toolCalls, warnings);
         }
 
         if (containsAny(message, "송장 미입력", "송장 없는", "송장 누락", "송장 안 들어간") &&
@@ -885,6 +893,39 @@ public class OmsAgentService {
         return keyword.isBlank() ? null : keyword;
     }
 
+    private String extractInvoiceOrderKeyword(String message) {
+        if (!containsAny(message, "송장번호", "송장 번호", "운송장", "운송장번호", "운송장 번호", "택배번호", "택배 번호")) {
+            return null;
+        }
+        if (!containsAny(message, "주문번호", "주문 번호", "주문")) {
+            return null;
+        }
+
+        Matcher matcher = ORDER_TOKEN_PATTERN.matcher(message);
+        if (matcher.find()) {
+            return matcher.group(1).replace("_", "-").trim();
+        }
+
+        String keyword = message.trim()
+            .replace("송장번호", " ")
+            .replace("송장 번호", " ")
+            .replace("운송장번호", " ")
+            .replace("운송장 번호", " ")
+            .replace("택배번호", " ")
+            .replace("택배 번호", " ")
+            .replace("주문번호", " ")
+            .replace("주문 번호", " ")
+            .replace("주문", " ")
+            .replace("해당하는", " ")
+            .replace("알려줘", " ")
+            .replace("알려", " ")
+            .replace("뭐야", " ")
+            .replace("무엇", " ")
+            .replace("조회", " ")
+            .trim();
+        return keyword.isBlank() ? null : keyword;
+    }
+
     private String extractProductKeyword(String message) {
         if (!containsAny(message, "상품", "제품", "sku", "바코드")) {
             return null;
@@ -1125,6 +1166,33 @@ public class OmsAgentService {
             '%s' 검색 결과 %s건입니다.
             %s
             """.formatted(keyword, result.getOrDefault("count", orders.size()), lines);
+    }
+
+    private String formatOrderInvoiceResult(String keyword, Map<String, Object> result) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> orders = (List<Map<String, Object>>) result.getOrDefault("orders", List.of());
+
+        if (orders.isEmpty()) {
+            return "'%s' 주문을 찾지 못했습니다.\n주문번호를 다시 확인해 주세요.".formatted(keyword);
+        }
+
+        Map<String, Object> exact = orders.stream()
+            .filter(order -> String.valueOf(order.getOrDefault("orderNo", "")).equalsIgnoreCase(keyword))
+            .findFirst()
+            .orElse(orders.get(0));
+
+        String orderNo = valueOrDash(exact.get("orderNo"));
+        String trackingNo = String.valueOf(exact.getOrDefault("trackingNo", "")).trim();
+        if (trackingNo.isBlank()) {
+            return "%s 주문에는 아직 송장번호가 없습니다.\n현재 상태는 %s입니다.".formatted(
+                orderNo,
+                formatOrderStatus(exact.get("status"))
+            );
+        }
+
+        String carrierName = String.valueOf(exact.getOrDefault("carrierName", "")).trim();
+        String carrierText = carrierName.isBlank() ? "" : "\n- 택배사: " + carrierName;
+        return "%s 주문의 송장번호는 %s입니다.%s".formatted(orderNo, trackingNo, carrierText);
     }
 
     @SuppressWarnings("unchecked")
