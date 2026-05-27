@@ -17,6 +17,10 @@ import java.util.UUID;
  */
 @Repository
 public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
+    interface ProductCodeQuantity {
+        String getProductCode();
+        Long getQuantity();
+    }
     
     /**
      * 주문별 상품 조회
@@ -49,6 +53,22 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
         ORDER BY o.orderedAt ASC, o.orderNo ASC
         """)
     List<OrderItem> findUnshippedByProductCodes(
+        @Param("productCodes") List<String> productCodes,
+        @Param("statuses") List<Order.OrderStatus> statuses
+    );
+
+    @Query("""
+        SELECT LOWER(TRIM(i.productCode)) AS productCode,
+               SUM(i.quantity - COALESCE(i.cancelledQuantity, 0)) AS quantity
+        FROM OrderItem i
+        JOIN i.order o
+        WHERE LOWER(TRIM(i.productCode)) IN :productCodes
+          AND o.orderStatus IN :statuses
+          AND i.itemStatus <> 'CANCELLED'
+          AND (i.quantity - COALESCE(i.cancelledQuantity, 0)) > 0
+        GROUP BY LOWER(TRIM(i.productCode))
+        """)
+    List<ProductCodeQuantity> sumActiveQuantitiesByProductCodes(
         @Param("productCodes") List<String> productCodes,
         @Param("statuses") List<Order.OrderStatus> statuses
     );

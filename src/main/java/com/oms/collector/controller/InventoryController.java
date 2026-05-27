@@ -17,8 +17,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -273,6 +275,43 @@ public class InventoryController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/products/order-quantities")
+    public ResponseEntity<Map<UUID, Integer>> getOrderQuantities(@RequestBody Map<String, List<UUID>> request) {
+        List<UUID> productIds = request != null ? request.getOrDefault("productIds", List.of()) : List.of();
+        if (productIds.isEmpty()) {
+            return ResponseEntity.ok(Map.of());
+        }
+
+        List<Product> products = productRepository.findAllById(productIds);
+        Map<String, Set<UUID>> codeToProductIds = new HashMap<>();
+        Map<UUID, Integer> quantities = new HashMap<>();
+        for (Product product : products) {
+            UUID productId = product.getProductId();
+            quantities.put(productId, 0);
+            addProductCodeMapping(codeToProductIds, product.getSku(), productId);
+            addProductCodeMapping(codeToProductIds, product.getBarcode(), productId);
+            addProductCodeMapping(codeToProductIds, product.getOptionCode(), productId);
+        }
+
+        if (codeToProductIds.isEmpty()) {
+            return ResponseEntity.ok(quantities);
+        }
+
+        List<OrderItemRepository.ProductCodeQuantity> sums = orderItemRepository.sumActiveQuantitiesByProductCodes(
+            new ArrayList<>(codeToProductIds.keySet()),
+            List.of(Order.OrderStatus.PENDING, Order.OrderStatus.CONFIRMED)
+        );
+        for (OrderItemRepository.ProductCodeQuantity row : sums) {
+            String code = normalizeCode(row.getProductCode());
+            int quantity = row.getQuantity() != null ? row.getQuantity().intValue() : 0;
+            for (UUID productId : codeToProductIds.getOrDefault(code, Set.of())) {
+                quantities.merge(productId, quantity, Integer::sum);
+            }
+        }
+
+        return ResponseEntity.ok(quantities);
+    }
+
     /**
      * 재고 동기화: 레거시 창고 컬럼 기준으로 totalStock/availableStock 재계산
      * product_warehouse_stock 테이블의 레거시 창고(ANYANG/ICHEON_BOX/ICHEON_PCS/BUCHEON) 항목은 삭제 후 정리
@@ -388,6 +427,17 @@ public class InventoryController {
         if (value != null && !value.isBlank()) {
             target.add(value.trim());
         }
+    }
+
+    private static void addProductCodeMapping(Map<String, Set<UUID>> target, String value, UUID productId) {
+        String code = normalizeCode(value);
+        if (!code.isBlank()) {
+            target.computeIfAbsent(code, ignored -> new LinkedHashSet<>()).add(productId);
+        }
+    }
+
+    private static String normalizeCode(String value) {
+        return value == null ? "" : value.trim().toLowerCase();
     }
 
     private static String extractInvoiceNo(String memo) {
