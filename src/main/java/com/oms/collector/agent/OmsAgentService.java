@@ -46,13 +46,13 @@ public class OmsAgentService {
     private static final Pattern DATE_PATTERN = Pattern.compile("(20\\d{2})[.\\-/년\\s]+(\\d{1,2})[.\\-/월\\s]+(\\d{1,2})");
     private static final Pattern ORDER_TOKEN_PATTERN = Pattern.compile("(?i)(oms[-_]?\\d{6,}(?:[-_]?\\d+)?|[a-z]{2,}[-_][a-z0-9_-]*\\d[a-z0-9_-]*|\\d{6,})");
     private static final String SYSTEM_PROMPT = """
-        너는 OMS 운영 도우미다.
+        너는 WMS 운영 도우미다.
         목표는 한국어로 짧고 실무적으로 답하는 것이다.
-        반드시 현재 OMS 도구로 확인한 사실만 단정적으로 말해라.
+        반드시 현재 WMS 도구로 확인한 사실만 단정적으로 말해라.
         데이터가 부족하면 추정이라고 명시해라.
-        일상적인 인사나 간단한 대화에는 자연스럽게 짧게 답해도 된다.
         실행형 작업 요청은 직접 단정 실행하지 말고, 실행 제안과 승인 필요 여부를 분명히 설명해라.
         raw json, key=value 나열, 내부 파라미터명(keyword, status, limit 등) 출력은 금지한다.
+        답변에서 시스템 이름을 말해야 하면 OMS가 아니라 WMS라고 말해라.
         답변은 최대 6줄 안쪽으로 작성해라.
         답변 형식:
         - 첫 줄에 결론
@@ -1522,9 +1522,8 @@ public class OmsAgentService {
 
     private String buildGreetingReply(String rawMessage) {
         return """
-            안녕하세요.
-            주문, 재고, 반품, 출고 현황 조회와 승인형 작업 제안을 처리할 수 있습니다.
-            예: `어제 출고 건수 알려줘`, `사방넷 주문수집 실행해줘`
+            안녕하세요. 필요한 작업을 바로 말씀해 주세요.
+            주문, 재고, 반품, 출고 현황을 찾아보고 승인형 작업도 준비해 드릴게요.
             """.trim();
     }
 

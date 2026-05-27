@@ -539,29 +539,42 @@ public class OmsAgentToolService {
         if (memo == null || memo.isBlank()) {
             return null;
         }
-        int invoiceIndex = memo.indexOf(INVOICE_PREFIX);
-        if (invoiceIndex < 0) {
+        String carrierCode = findMemoValue(memo, "CARRIER");
+        String carrierName = findMemoValue(memo, "CARRIER_NAME");
+        String trackingNo = findMemoValue(memo, "TRACKING");
+        if (carrierCode.isBlank() && carrierName.isBlank() && trackingNo.isBlank()) {
             return null;
         }
+        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
+    }
 
-        String carrierCode = "";
-        String carrierName = "";
-        String trackingNo = "";
-        String invoiceSegment = memo.substring(invoiceIndex + INVOICE_PREFIX.length());
-        for (String part : invoiceSegment.split("\\|")) {
-            String[] kv = part.split("=", 2);
-            if (kv.length != 2) {
+    private String findMemoValue(String memo, String key) {
+        String upperKey = key.toUpperCase(Locale.ROOT);
+        for (String part : memo.split("\\|")) {
+            String trimmed = part.trim();
+            int invoiceIdx = trimmed.indexOf(INVOICE_PREFIX);
+            if (invoiceIdx >= 0) {
+                trimmed = trimmed.substring(invoiceIdx + INVOICE_PREFIX.length()).trim();
+            }
+            int equalsIdx = trimmed.indexOf('=');
+            int colonIdx = trimmed.indexOf(':');
+            int sepIdx;
+            if (equalsIdx < 0) {
+                sepIdx = colonIdx;
+            } else if (colonIdx < 0) {
+                sepIdx = equalsIdx;
+            } else {
+                sepIdx = Math.min(equalsIdx, colonIdx);
+            }
+            if (sepIdx < 0) {
                 continue;
             }
-            switch (kv[0]) {
-                case "CARRIER" -> carrierCode = kv[1];
-                case "CARRIER_NAME" -> carrierName = kv[1];
-                case "TRACKING" -> trackingNo = kv[1];
-                default -> {
-                }
+            String foundKey = trimmed.substring(0, sepIdx).trim().toUpperCase(Locale.ROOT);
+            if (upperKey.equals(foundKey)) {
+                return trimmed.substring(sepIdx + 1).trim();
             }
         }
-        return new InvoiceInfo(carrierCode, carrierName, trackingNo);
+        return "";
     }
 
     private record InvoiceInfo(String carrierCode, String carrierName, String trackingNo) {}
