@@ -475,11 +475,19 @@ public class InvoiceController {
         if (q == null || q.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "검색어를 입력하세요"));
         }
-        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
+        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED);
 
         Order order = orderRepository.findWithItemsByOrderNo(q).orElse(null);
+        if (order != null && order.getOrderStatus() == Order.OrderStatus.SHIPPED) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "이미 출고 완료된 주문입니다: " + q));
+        }
         if (order == null || !statuses.contains(order.getOrderStatus())) {
             order = orderRepository.findByTrackingNoInMemo(statuses, q).orElse(null);
+        }
+        if (order == null && orderRepository.findByTrackingNoInMemo(List.of(Order.OrderStatus.SHIPPED), q).isPresent()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("message", "이미 출고 완료된 주문입니다: " + q));
         }
         if (order == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -697,18 +705,16 @@ public class InvoiceController {
         @RequestParam(required = false) String startDate,
         @RequestParam(required = false) String endDate
     ) {
-        // CONFIRMED(송장입력 완료) + SHIPPED(검수출고 완료) 모두 포함
-        List<Order.OrderStatus> statuses = List.of(Order.OrderStatus.CONFIRMED, Order.OrderStatus.SHIPPED);
         List<Order> orders;
         if (startDate != null && endDate != null) {
             LocalDateTime start = LocalDate.parse(startDate).atStartOfDay();
             LocalDateTime end   = LocalDate.parse(endDate).atTime(23, 59, 59);
-            orders = orderRepository.findByOrderStatusInAndUpdatedAtRange(statuses, start, end);
+            orders = orderRepository.findByOrderStatusAndUpdatedAtRange(Order.OrderStatus.CONFIRMED, start, end);
         } else {
             orders = new ArrayList<>();
             int p = 0; while(true) {
                 var pg = PageRequest.of(p++, 500, Sort.by(Sort.Direction.DESC, "updatedAt"));
-                var sl = orderRepository.findByOrderStatusIn(statuses, pg);
+                var sl = orderRepository.findByOrderStatus(Order.OrderStatus.CONFIRMED, pg);
                 orders.addAll(sl.getContent()); if(!sl.hasNext()) break;
             }
         }
