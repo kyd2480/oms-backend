@@ -22,6 +22,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.StringReader;
@@ -228,11 +229,19 @@ public class SabangnetOrderCollectionService {
         if (rawResponse == null || rawResponse.isBlank()) {
             return List.of();
         }
-        String text = rawResponse.trim();
-        if (text.startsWith("<")) {
-            return parseXmlOrders(text);
+        String text = rawResponse.replace("\uFEFF", "").trim();
+        if (text.startsWith("<") || text.contains("<?xml") || looksLikeXmlFragment(text)) {
+            try {
+                return parseXmlOrders(text);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("XML 응답 파싱 실패: " + readableParseError(e) + " / 응답 앞부분: " + responsePreview(text));
+            }
         }
-        return parseJsonOrders(text);
+        try {
+            return parseJsonOrders(text);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON 응답 파싱 실패: " + readableParseError(e) + " / 응답 앞부분: " + responsePreview(text));
+        }
     }
 
     private List<CollectedOrder> parseJsonOrders(String rawResponse) throws Exception {
@@ -320,7 +329,7 @@ public class SabangnetOrderCollectionService {
     private List<CollectedOrder> parseXmlOrders(String rawResponse) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(rawResponse)));
+        Document document = parseXmlDocument(factory, rawResponse);
         document.getDocumentElement().normalize();
 
         List<Element> orderElements = elementsByName(document, "order");
@@ -340,6 +349,54 @@ public class SabangnetOrderCollectionService {
             }
         }
         return orders;
+    }
+
+    private Document parseXmlDocument(DocumentBuilderFactory factory, String rawResponse) throws Exception {
+        String xml = normalizeXmlText(rawResponse);
+        try {
+            return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+        } catch (SAXException first) {
+            String wrapped = "<root>" + stripXmlDeclaration(xml) + "</root>";
+            return factory.newDocumentBuilder().parse(new InputSource(new StringReader(wrapped)));
+        }
+    }
+
+    private String normalizeXmlText(String rawResponse) {
+        String text = rawResponse == null ? "" : rawResponse.replace("\uFEFF", "").trim();
+        int declarationIndex = text.indexOf("<?xml");
+        if (declarationIndex > 0) {
+            text = text.substring(declarationIndex);
+        } else {
+            int firstMarkup = text.indexOf('<');
+            if (firstMarkup > 0) {
+                text = text.substring(firstMarkup);
+            }
+        }
+        return text.trim();
+    }
+
+    private String stripXmlDeclaration(String xml) {
+        return xml.replaceFirst("^\\s*<\\?xml[^>]*>\\s*", "");
+    }
+
+    private boolean looksLikeXmlFragment(String text) {
+        return text.contains("<order")
+            || text.contains("<Order")
+            || text.contains("<ORD")
+            || text.contains("<data")
+            || text.contains("<result")
+            || text.contains("<Response")
+            || text.contains("<response");
+    }
+
+    private String readableParseError(Exception e) {
+        String message = safeText(e.getMessage());
+        return message.isBlank() ? e.getClass().getSimpleName() : message;
+    }
+
+    private String responsePreview(String text) {
+        String preview = safeText(text).replaceAll("\\s+", " ");
+        return preview.length() > 500 ? preview.substring(0, 500) + "..." : preview;
     }
 
     private CollectedOrder mapXmlOrder(Element element) {
