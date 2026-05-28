@@ -230,6 +230,9 @@ public class SabangnetOrderCollectionService {
             return List.of();
         }
         String text = rawResponse.replace("\uFEFF", "").trim();
+        if (looksLikeHtmlPage(text)) {
+            throw new IllegalArgumentException("주문 API가 아니라 웹 페이지 HTML이 응답했습니다. API URL에 무신사/사방넷 로그인 페이지가 아닌 주문조회 API 엔드포인트를 등록해야 합니다. / 응답 제목: " + htmlTitle(text));
+        }
         if (text.startsWith("<") || text.contains("<?xml") || looksLikeXmlFragment(text)) {
             try {
                 return parseXmlOrders(text);
@@ -387,6 +390,26 @@ public class SabangnetOrderCollectionService {
             || text.contains("<result")
             || text.contains("<Response")
             || text.contains("<response");
+    }
+
+    private boolean looksLikeHtmlPage(String text) {
+        String lower = safeText(text).toLowerCase();
+        return lower.startsWith("<!doctype html")
+            || lower.startsWith("<html")
+            || lower.contains("<html")
+            || lower.contains("<body")
+            || lower.contains("<script");
+    }
+
+    private String htmlTitle(String text) {
+        String source = safeText(text);
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+            .compile("(?is)<title[^>]*>(.*?)</title>")
+            .matcher(source);
+        if (matcher.find()) {
+            return matcher.group(1).replaceAll("\\s+", " ").trim();
+        }
+        return "확인 불가";
     }
 
     private String readableParseError(Exception e) {
