@@ -64,6 +64,10 @@ public class SabangnetIntegration {
     @Default
     private Boolean enabled = true;
 
+    @Column(name = "test_mode", nullable = false)
+    @Default
+    private Boolean testMode = false;
+
     @Column(name = "memo", length = 500)
     private String memo;
 

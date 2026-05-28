@@ -25,6 +25,7 @@ public class SabangnetIntegrationDto {
     private String apiBaseUrl;
     private String logisticsPlaceId;
     private Boolean enabled;
+    private Boolean testMode;
     private String memo;
     private LocalDateTime lastCollectedAt;
     private LocalDateTime createdAt;

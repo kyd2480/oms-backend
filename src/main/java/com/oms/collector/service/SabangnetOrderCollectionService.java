@@ -117,7 +117,10 @@ public class SabangnetOrderCollectionService {
 
     private SabangnetCollectResult collectIntegration(SabangnetIntegration integration, LocalDateTime start, LocalDateTime end) {
         String channelCode = channelCode(integration);
-        ensureSabangnetChannel(integration, channelCode);
+        boolean testMode = Boolean.TRUE.equals(integration.getTestMode());
+        if (!testMode) {
+            ensureSabangnetChannel(integration, channelCode);
+        }
 
         int collected = 0;
         int saved = 0;
@@ -129,34 +132,41 @@ public class SabangnetOrderCollectionService {
             List<CollectedOrder> orders = parseOrders(rawResponse);
             collected += orders.size();
 
-            for (CollectedOrder order : orders) {
-                order.setChannelCode(channelCode);
-                if (order.getRawJson() == null || order.getRawJson().isBlank()) {
-                    order.setRawJson(objectMapper.writeValueAsString(order));
+            if (!testMode) {
+                for (CollectedOrder order : orders) {
+                    order.setChannelCode(channelCode);
+                    if (order.getRawJson() == null || order.getRawJson().isBlank()) {
+                        order.setRawJson(objectMapper.writeValueAsString(order));
+                    }
+                    rawOrderService.saveRawOrder(order);
+                    saved++;
                 }
-                rawOrderService.saveRawOrder(order);
-                saved++;
-            }
 
-            integration.setLastCollectedAt(end);
-            integrationRepository.save(integration);
-            processed = processingService.processUnprocessedOrdersByChannel(channelCode);
-            log.info("사방넷 주문 수집 완료: mall={}, channel={}, collected={}", mallLabel(integration), channelCode, orders.size());
+                integration.setLastCollectedAt(end);
+                integrationRepository.save(integration);
+                processed = processingService.processUnprocessedOrdersByChannel(channelCode);
+                log.info("사방넷 주문 수집 완료: mall={}, channel={}, collected={}", mallLabel(integration), channelCode, orders.size());
+            } else {
+                log.info("사방넷 테스트 수집 완료: mall={}, channel={}, fetched={}", mallLabel(integration), channelCode, orders.size());
+            }
         } catch (Exception e) {
             String message = mallLabel(integration) + ": " + e.getMessage();
             errors.add(message);
-            log.error("사방넷 주문 수집 실패: {}", mallLabel(integration), e);
+            log.error("사방넷 주문 {} 실패: {}", testMode ? "테스트 수집" : "수집", mallLabel(integration), e);
         }
 
         return SabangnetCollectResult.builder()
             .success(errors.isEmpty())
-            .message(errors.isEmpty() ? "사방넷 주문 수집 완료" : "사방넷 주문 수집 실패")
+            .message(errors.isEmpty()
+                ? (testMode ? "주문수집 테스트 완료: API 연결과 응답 파싱이 정상입니다" : "사방넷 주문 수집 완료")
+                : (testMode ? "주문수집 테스트 실패" : "사방넷 주문 수집 실패"))
             .startDate(start)
             .endDate(end)
             .integrationCount(1)
             .mallCode(integration.getMallCode())
             .mallName(mallLabel(integration))
             .channelCode(channelCode)
+            .testMode(testMode)
             .collectedCount(collected)
             .savedCount(saved)
             .processedCount(processed)
@@ -523,6 +533,7 @@ public class SabangnetOrderCollectionService {
         String mallCode,
         String mallName,
         String channelCode,
+        boolean testMode,
         int collectedCount,
         int savedCount,
         int processedCount,

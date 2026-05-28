@@ -145,6 +145,7 @@ public class OperationalSchemaMigration {
                 api_base_url VARCHAR(300) NOT NULL,
                 logistics_place_id VARCHAR(100),
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                test_mode BOOLEAN NOT NULL DEFAULT FALSE,
                 memo VARCHAR(500),
                 last_collected_at TIMESTAMP,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -153,6 +154,7 @@ public class OperationalSchemaMigration {
             """.formatted(prefix));
         execute("ALTER TABLE %ssabangnet_integrations ADD COLUMN IF NOT EXISTS mall_code VARCHAR(100)".formatted(prefix));
         execute("ALTER TABLE %ssabangnet_integrations ADD COLUMN IF NOT EXISTS mall_name VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %ssabangnet_integrations ADD COLUMN IF NOT EXISTS test_mode BOOLEAN NOT NULL DEFAULT FALSE".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_sabangnet_integrations_company_code ON %ssabangnet_integrations(company_code)".formatted(prefix));
         execute("DROP INDEX IF EXISTS %suk_sabangnet_integrations_company_id".formatted(prefix));
         execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_sabangnet_integrations_company_mall ON %ssabangnet_integrations(company_code, sabangnet_id, mall_code) WHERE mall_code IS NOT NULL".formatted(prefix));

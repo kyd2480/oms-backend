@@ -42,6 +42,7 @@ public class SabangnetIntegrationService {
             .apiBaseUrl(normalizeApiBaseUrl(dto.getApiBaseUrl()))
             .logisticsPlaceId(blankToNull(dto.getLogisticsPlaceId()))
             .enabled(dto.getEnabled() == null || dto.getEnabled())
+            .testMode(Boolean.TRUE.equals(dto.getTestMode()))
             .memo(blankToNull(dto.getMemo()))
             .build();
         return toDto(repository.save(entity));
@@ -63,6 +64,7 @@ public class SabangnetIntegrationService {
         entity.setApiBaseUrl(normalizeApiBaseUrl(dto.getApiBaseUrl()));
         entity.setLogisticsPlaceId(blankToNull(dto.getLogisticsPlaceId()));
         entity.setEnabled(dto.getEnabled() == null || dto.getEnabled());
+        entity.setTestMode(Boolean.TRUE.equals(dto.getTestMode()));
         entity.setMemo(blankToNull(dto.getMemo()));
         return toDto(repository.save(entity));
     }
@@ -95,6 +97,7 @@ public class SabangnetIntegrationService {
             .apiBaseUrl(entity.getApiBaseUrl())
             .logisticsPlaceId(entity.getLogisticsPlaceId())
             .enabled(entity.getEnabled())
+            .testMode(Boolean.TRUE.equals(entity.getTestMode()))
             .memo(entity.getMemo())
             .lastCollectedAt(entity.getLastCollectedAt())
             .createdAt(entity.getCreatedAt())
