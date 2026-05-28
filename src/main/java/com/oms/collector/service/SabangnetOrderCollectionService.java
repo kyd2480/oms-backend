@@ -15,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -164,7 +165,7 @@ public class SabangnetOrderCollectionService {
                 log.info("사방넷 테스트 수집 완료: mall={}, channel={}, fetched={}", mallLabel(integration), channelCode, orders.size());
             }
         } catch (Exception e) {
-            String message = mallLabel(integration) + ": " + e.getMessage();
+            String message = mallLabel(integration) + ": " + readableError(e);
             errors.add(message);
             log.error("사방넷 주문 {} 실패: {}", testMode ? "테스트 수집" : "수집", mallLabel(integration), e);
         }
@@ -208,6 +209,19 @@ public class SabangnetOrderCollectionService {
             .retrieve()
             .bodyToMono(String.class)
             .block();
+    }
+
+    private String readableError(Exception e) {
+        if (e instanceof WebClientResponseException webException) {
+            String body = safeText(webException.getResponseBodyAsString());
+            if (body.length() > 500) {
+                body = body.substring(0, 500) + "...";
+            }
+            return "외부 API 요청 실패 (" + webException.getRawStatusCode() + ")"
+                + (body.isBlank() ? "" : ": " + body);
+        }
+        String message = safeText(e.getMessage());
+        return message.isBlank() ? e.getClass().getSimpleName() : message;
     }
 
     private List<CollectedOrder> parseOrders(String rawResponse) throws Exception {
