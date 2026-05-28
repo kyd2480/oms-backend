@@ -29,7 +29,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -62,12 +64,18 @@ public class SabangnetOrderCollectionService {
         int saved = 0;
         int processed = 0;
         List<String> errors = new ArrayList<>();
+        List<Map<String, Object>> sampleOrders = new ArrayList<>();
+        boolean testMode = false;
 
         for (SabangnetIntegration integration : integrations) {
             SabangnetCollectResult result = collectIntegration(integration, start, end);
             collected += result.collectedCount();
             saved += result.savedCount();
             processed += result.processedCount();
+            testMode = testMode || result.testMode();
+            if (result.sampleOrders() != null) {
+                sampleOrders.addAll(result.sampleOrders());
+            }
             if (result.errors() != null) errors.addAll(result.errors());
         }
 
@@ -82,10 +90,12 @@ public class SabangnetOrderCollectionService {
             .startDate(start)
             .endDate(end)
             .integrationCount(integrations.size())
+            .testMode(testMode)
             .collectedCount(collected)
             .savedCount(saved)
             .processedCount(processed)
             .errors(errors)
+            .sampleOrders(sampleOrders.size() > 20 ? sampleOrders.subList(0, 20) : sampleOrders)
             .build();
     }
 
@@ -126,11 +136,15 @@ public class SabangnetOrderCollectionService {
         int saved = 0;
         int processed = 0;
         List<String> errors = new ArrayList<>();
+        List<Map<String, Object>> sampleOrders = List.of();
 
         try {
             String rawResponse = requestOrders(integration, start, end);
             List<CollectedOrder> orders = parseOrders(rawResponse);
             collected += orders.size();
+            if (testMode) {
+                sampleOrders = summarizeCollectedOrders(orders);
+            }
 
             if (!testMode) {
                 for (CollectedOrder order : orders) {
@@ -171,6 +185,7 @@ public class SabangnetOrderCollectionService {
             .savedCount(saved)
             .processedCount(processed)
             .errors(errors)
+            .sampleOrders(sampleOrders)
             .build();
     }
 
@@ -523,6 +538,57 @@ public class SabangnetOrderCollectionService {
         return null;
     }
 
+    private List<Map<String, Object>> summarizeCollectedOrders(List<CollectedOrder> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return List.of();
+        }
+        return orders.stream()
+            .limit(20)
+            .map(order -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("channelOrderNo", safeText(order.getChannelOrderNo()));
+                row.put("recipientName", safeText(order.getRecipientName()));
+                row.put("recipientPhone", safeText(order.getRecipientPhone()));
+                row.put("address", joinAddress(order.getAddress(), order.getAddressDetail()));
+                row.put("orderedAt", order.getOrderedAt() == null ? "" : order.getOrderedAt().toString());
+                row.put("status", safeText(order.getStatus()));
+                row.put("totalQuantity", order.getTotalQuantity());
+                row.put("itemCount", order.getItems() == null ? 0 : order.getItems().size());
+                row.put("productSummary", summarizeCollectedItems(order.getItems()));
+                return row;
+            })
+            .toList();
+    }
+
+    private String summarizeCollectedItems(List<CollectedOrderItem> items) {
+        if (items == null || items.isEmpty()) {
+            return "";
+        }
+        return items.stream()
+            .limit(3)
+            .map(item -> {
+                String name = safeText(item.getProductName());
+                String option = safeText(item.getOptionName());
+                int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+                String product = option.isBlank() ? name : name + " (" + option + ")";
+                return product + " x" + quantity;
+            })
+            .reduce((left, right) -> left + ", " + right)
+            .orElse("");
+    }
+
+    private String joinAddress(String address, String addressDetail) {
+        String base = safeText(address);
+        String detail = safeText(addressDetail);
+        if (detail.isBlank()) return base;
+        if (base.isBlank()) return detail;
+        return base + " " + detail;
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     @Builder
     public record SabangnetCollectResult(
         boolean success,
@@ -537,6 +603,7 @@ public class SabangnetOrderCollectionService {
         int collectedCount,
         int savedCount,
         int processedCount,
-        List<String> errors
+        List<String> errors,
+        List<Map<String, Object>> sampleOrders
     ) {}
 }
