@@ -102,7 +102,7 @@ public class RecordingVideoCleanupService {
             }
 
             Files.delete(target);
-            deleteEmptyParentDirectory(target, storageRoot);
+            deleteEmptyParentDirectories(target, storageRoot);
             return FileDeleteResult.DELETED;
         } catch (IOException e) {
             log.warn("Failed to delete expired recording file: recordingId={}, path={}, message={}",
@@ -111,22 +111,23 @@ public class RecordingVideoCleanupService {
         }
     }
 
-    private void deleteEmptyParentDirectory(Path filePath, Path storageRoot) {
+    private void deleteEmptyParentDirectories(Path filePath, Path storageRoot) {
         if (storageRoot == null) {
             return;
         }
 
         Path parent = filePath.getParent();
-        if (parent == null || parent.equals(storageRoot) || !parent.startsWith(storageRoot)) {
-            return;
-        }
-
-        try (var entries = Files.list(parent)) {
-            if (entries.findAny().isEmpty()) {
+        while (parent != null && !parent.equals(storageRoot) && parent.startsWith(storageRoot)) {
+            try (var entries = Files.list(parent)) {
+                if (entries.findAny().isPresent()) {
+                    return;
+                }
                 Files.deleteIfExists(parent);
+                parent = parent.getParent();
+            } catch (IOException ignored) {
+                // Empty date directories are only a cleanup nicety.
+                return;
             }
-        } catch (IOException ignored) {
-            // Empty invoice directories are only a cleanup nicety.
         }
     }
 

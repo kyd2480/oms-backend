@@ -29,7 +29,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -106,7 +108,8 @@ public class RecordingVideoController {
         String extension = extensionFromFileName(originalFileName);
         Path target;
         try {
-            Path targetDir = storageRoot();
+            Path targetDir = datedStorageDir(storageRoot());
+            Files.createDirectories(targetDir);
             String targetFileName = safeFileName(normalizedInvoice) + "_" + recordingId + extension;
             target = targetDir.resolve(targetFileName);
             Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -206,6 +209,14 @@ public class RecordingVideoController {
             : Path.of(System.getProperty("java.io.tmpdir"), "recording-videos");
         Files.createDirectories(root);
         return root;
+    }
+
+    private Path datedStorageDir(Path root) {
+        LocalDate today = LocalDate.now();
+        return root
+            .resolve(DateTimeFormatter.ofPattern("yyyy").format(today))
+            .resolve(DateTimeFormatter.ofPattern("MM").format(today))
+            .resolve(DateTimeFormatter.ofPattern("dd").format(today));
     }
 
     private ResponseEntity<Map<String, Object>> uploadError(String message) {
