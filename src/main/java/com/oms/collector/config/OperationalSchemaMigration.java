@@ -22,6 +22,7 @@ public class OperationalSchemaMigration {
         migratePrintTypes();
         migrateSabangnetIntegrations();
         migrateInvoiceApiLogs();
+        migrateRecordingVideos();
         migrateCarrierContracts();
         migrateWorkLocks();
         log.info("운영 스키마 보정 완료");
@@ -194,6 +195,46 @@ public class OperationalSchemaMigration {
         execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_order_no ON %sinvoice_api_logs(order_no)".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_tracking_no ON %sinvoice_api_logs(tracking_no)".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_invoice_api_logs_created_at ON %sinvoice_api_logs(created_at)".formatted(prefix));
+    }
+
+    private void migrateRecordingVideos() {
+        migrateRecordingVideosForSchema("public");
+        jdbcTemplate.queryForList(
+            "SELECT schema_name FROM information_schema.schemata " +
+            "WHERE schema_name NOT IN ('public','information_schema','pg_catalog','pg_toast') " +
+            "  AND schema_name NOT LIKE 'pg_%'",
+            String.class
+        ).forEach(this::migrateRecordingVideosForSchema);
+    }
+
+    private void migrateRecordingVideosForSchema(String schema) {
+        if (schema == null || !schema.matches("[a-zA-Z_][a-zA-Z0-9_]{0,62}")) {
+            return;
+        }
+        String prefix = "\"%s\".".formatted(schema);
+        execute("""
+            CREATE TABLE IF NOT EXISTS %srecording_videos (
+                recording_id UUID PRIMARY KEY,
+                invoice_no VARCHAR(100) NOT NULL,
+                order_no VARCHAR(100),
+                file_name VARCHAR(300),
+                local_path TEXT,
+                video_url TEXT,
+                video_format VARCHAR(30),
+                mode VARCHAR(30),
+                status VARCHAR(30) NOT NULL DEFAULT 'SAVED',
+                duration_sec DOUBLE PRECISION,
+                started_at TIMESTAMP,
+                ended_at TIMESTAMP,
+                pc_name VARCHAR(150),
+                camera_setting VARCHAR(300),
+                memo TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """.formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_invoice_no ON %srecording_videos(invoice_no)".formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_order_no ON %srecording_videos(order_no)".formatted(prefix));
+        execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_created_at ON %srecording_videos(created_at)".formatted(prefix));
     }
 
     private void migrateCarrierContracts() {
