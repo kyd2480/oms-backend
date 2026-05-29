@@ -8,8 +8,10 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.ResourceRegion;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -183,28 +186,66 @@ public class RecordingVideoController {
 
     @GetMapping("/{recordingId}/stream")
     @Transactional(readOnly = true)
-    public ResponseEntity<Resource> stream(@PathVariable UUID recordingId) {
-        RecordingVideo video = recordingVideoRepository.findById(recordingId)
-            .or(() -> recordingVideoRepository.findFirstByVideoUrlContaining(recordingId.toString()))
-            .orElse(null);
+    public ResponseEntity<?> stream(
+        @PathVariable UUID recordingId,
+        @RequestHeader HttpHeaders requestHeaders
+    ) throws IOException {
+        RecordingVideo video = findVideo(recordingId);
         if (video == null) {
             return ResponseEntity.notFound().build();
         }
-        String pathText = normalize(video.getLocalPath());
-        if (pathText == null) {
-            return ResponseEntity.notFound().build();
-        }
-        Path path = Path.of(pathText);
-        if (!Files.exists(path) || !Files.isRegularFile(path)) {
+        Path path = videoPath(video);
+        if (path == null) {
             return ResponseEntity.notFound().build();
         }
 
         Resource resource = new FileSystemResource(path);
         MediaType contentType = mediaTypeFor(video.getFileName(), path);
         String downloadName = safeFileName(video.getRecordingId() + extensionFromFileName(video.getFileName()));
+        long contentLength = resource.contentLength();
+        List<HttpRange> ranges = requestHeaders.getRange();
+        if (!ranges.isEmpty()) {
+            HttpRange range = ranges.get(0);
+            long start = range.getRangeStart(contentLength);
+            long end = range.getRangeEnd(contentLength);
+            long rangeLength = Math.min(end - start + 1, contentLength - start);
+            ResourceRegion region = new ResourceRegion(resource, start, rangeLength);
+            return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
+                .contentType(contentType)
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + downloadName + "\"")
+                .body(region);
+        }
+
         return ResponseEntity.ok()
             .contentType(contentType)
+            .contentLength(contentLength)
+            .header(HttpHeaders.ACCEPT_RANGES, "bytes")
             .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + downloadName + "\"")
+            .body(resource);
+    }
+
+    @GetMapping("/{recordingId}/download")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Resource> download(@PathVariable UUID recordingId) throws IOException {
+        RecordingVideo video = findVideo(recordingId);
+        if (video == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Path path = videoPath(video);
+        if (path == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Resource resource = new FileSystemResource(path);
+        String downloadName = safeFileName(
+            (normalize(video.getInvoiceNo()) != null ? video.getInvoiceNo() : video.getRecordingId())
+                + extensionFromFileName(video.getFileName())
+        );
+        return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .contentLength(resource.contentLength())
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + downloadName + "\"")
             .body(resource);
     }
 
@@ -285,6 +326,24 @@ public class RecordingVideoController {
             .path(recordingId.toString())
             .path("/stream")
             .toUriString();
+    }
+
+    private RecordingVideo findVideo(UUID recordingId) {
+        return recordingVideoRepository.findById(recordingId)
+            .or(() -> recordingVideoRepository.findFirstByVideoUrlContaining(recordingId.toString()))
+            .orElse(null);
+    }
+
+    private Path videoPath(RecordingVideo video) {
+        String pathText = normalize(video.getLocalPath());
+        if (pathText == null) {
+            return null;
+        }
+        Path path = Path.of(pathText);
+        if (!Files.exists(path) || !Files.isRegularFile(path)) {
+            return null;
+        }
+        return path;
     }
 
     private RecordingVideoDto toDto(RecordingVideo video) {
