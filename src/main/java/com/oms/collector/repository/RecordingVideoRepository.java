@@ -13,4 +13,8 @@ public interface RecordingVideoRepository extends JpaRepository<RecordingVideo, 
     List<RecordingVideo> findTop50ByInvoiceNoOrderByCreatedAtDesc(String invoiceNo);
 
     List<RecordingVideo> findTop50ByOrderNoOrderByCreatedAtDesc(String orderNo);
+
+    List<RecordingVideo> findTop50ByInvoiceNoAndVideoUrlIsNotNullOrderByCreatedAtDesc(String invoiceNo);
+
+    List<RecordingVideo> findTop50ByOrderNoAndVideoUrlIsNotNullOrderByCreatedAtDesc(String orderNo);
 }

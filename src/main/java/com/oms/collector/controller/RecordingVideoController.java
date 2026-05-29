@@ -130,15 +130,20 @@ public class RecordingVideoController {
     @Transactional(readOnly = true)
     public ResponseEntity<List<RecordingVideoDto>> find(
         @RequestParam(required = false) String invoiceNo,
-        @RequestParam(required = false) String orderNo
+        @RequestParam(required = false) String orderNo,
+        @RequestParam(required = false, defaultValue = "true") boolean uploadedOnly
     ) {
         String normalizedInvoice = normalize(invoiceNo);
         String normalizedOrderNo = normalize(orderNo);
         List<RecordingVideo> videos;
         if (normalizedInvoice != null) {
-            videos = recordingVideoRepository.findTop50ByInvoiceNoOrderByCreatedAtDesc(normalizedInvoice);
+            videos = uploadedOnly
+                ? recordingVideoRepository.findTop50ByInvoiceNoAndVideoUrlIsNotNullOrderByCreatedAtDesc(normalizedInvoice)
+                : recordingVideoRepository.findTop50ByInvoiceNoOrderByCreatedAtDesc(normalizedInvoice);
         } else if (normalizedOrderNo != null) {
-            videos = recordingVideoRepository.findTop50ByOrderNoOrderByCreatedAtDesc(normalizedOrderNo);
+            videos = uploadedOnly
+                ? recordingVideoRepository.findTop50ByOrderNoAndVideoUrlIsNotNullOrderByCreatedAtDesc(normalizedOrderNo)
+                : recordingVideoRepository.findTop50ByOrderNoOrderByCreatedAtDesc(normalizedOrderNo);
         } else {
             videos = List.of();
         }
