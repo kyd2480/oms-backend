@@ -106,13 +106,13 @@ public class RecordingVideoController {
         String extension = extensionFromFileName(originalFileName);
         Path target;
         try {
-            Path targetDir = storageRoot().resolve(safeFileName(normalizedInvoice));
-            Files.createDirectories(targetDir);
-            target = targetDir.resolve(recordingId + extension);
+            Path targetDir = storageRoot();
+            String targetFileName = safeFileName(normalizedInvoice) + "_" + recordingId + extension;
+            target = targetDir.resolve(targetFileName);
             Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             log.error("Recording video file upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
-            return uploadError("영상 파일 저장 실패: " + e.getMessage());
+            return uploadError("영상 파일 저장 실패: " + rootMessage(e));
         }
 
         RecordingVideo video = RecordingVideo.builder()
