@@ -112,7 +112,7 @@ public class RecordingVideoController {
             Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             log.error("Recording video file upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
-            return uploadError("영상 파일 저장 실패: " + rootMessage(e));
+            return uploadError("영상 파일 저장 실패: " + errorSummary(e) + " / " + storageDiagnostics());
         }
 
         RecordingVideo video = RecordingVideo.builder()
@@ -230,6 +230,30 @@ public class RecordingVideoController {
         }
         String message = current.getMessage();
         return message != null && !message.isBlank() ? message : throwable.getClass().getSimpleName();
+    }
+
+    private String errorSummary(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return current.getClass().getSimpleName() + (message != null && !message.isBlank() ? ": " + message : "");
+    }
+
+    private String storageDiagnostics() {
+        try {
+            String configured = normalize(configuredStorageDir);
+            Path root = configured != null
+                ? Path.of(configured).toAbsolutePath().normalize()
+                : Path.of(System.getProperty("java.io.tmpdir"), "recording-videos").toAbsolutePath().normalize();
+            return "storageRoot=" + root
+                + ", exists=" + Files.exists(root)
+                + ", directory=" + Files.isDirectory(root)
+                + ", writable=" + Files.isWritable(root);
+        } catch (RuntimeException e) {
+            return "storageRoot 진단 실패: " + errorSummary(e);
+        }
     }
 
     private String streamUrl(UUID recordingId) {
