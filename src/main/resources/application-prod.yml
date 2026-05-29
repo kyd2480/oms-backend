@@ -137,3 +137,6 @@ tracking:
 recording:
   video:
     storage-dir: ${RECORDING_VIDEO_STORAGE_DIR:}
+    cleanup-enabled: ${RECORDING_VIDEO_CLEANUP_ENABLED:true}
+    retention-months: ${RECORDING_VIDEO_RETENTION_MONTHS:2}
+    cleanup-cron: ${RECORDING_VIDEO_CLEANUP_CRON:0 30 3 * * *}
