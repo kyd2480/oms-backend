@@ -232,6 +232,25 @@ public class OperationalSchemaMigration {
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """.formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS invoice_no VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS order_no VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS file_name VARCHAR(300)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS local_path TEXT".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS video_url TEXT".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS video_format VARCHAR(30)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS mode VARCHAR(30)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'SAVED'".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS duration_sec DOUBLE PRECISION".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS started_at TIMESTAMP".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS pc_name VARCHAR(150)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS camera_setting VARCHAR(300)".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS memo TEXT".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP".formatted(prefix));
+        execute("UPDATE %srecording_videos SET status = 'SAVED' WHERE status IS NULL".formatted(prefix));
+        execute("UPDATE %srecording_videos SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ALTER COLUMN status SET NOT NULL".formatted(prefix));
+        execute("ALTER TABLE %srecording_videos ALTER COLUMN created_at SET NOT NULL".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_invoice_no ON %srecording_videos(invoice_no)".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_order_no ON %srecording_videos(order_no)".formatted(prefix));
         execute("CREATE INDEX IF NOT EXISTS idx_recording_videos_created_at ON %srecording_videos(created_at)".formatted(prefix));

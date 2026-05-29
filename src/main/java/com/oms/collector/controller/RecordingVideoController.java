@@ -3,11 +3,14 @@ package com.oms.collector.controller;
 import com.oms.collector.entity.RecordingVideo;
 import com.oms.collector.repository.RecordingVideoRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +38,7 @@ import java.util.UUID;
 @RequestMapping("/api/recording-videos")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
+@Slf4j
 public class RecordingVideoController {
 
     private final RecordingVideoRepository recordingVideoRepository;
@@ -75,7 +79,6 @@ public class RecordingVideoController {
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Transactional
     public ResponseEntity<?> upload(
         @RequestParam("file") MultipartFile file,
         @RequestParam String invoiceNo,
@@ -98,10 +101,27 @@ public class RecordingVideoController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "업로드 파일이 없습니다."));
         }
 
+        UUID recordingId = UUID.randomUUID();
+        String originalFileName = safeFileName(file.getOriginalFilename());
+        String extension = extensionFromFileName(originalFileName);
+        Path target;
+        try {
+            Path targetDir = storageRoot().resolve(safeFileName(normalizedInvoice));
+            Files.createDirectories(targetDir);
+            target = targetDir.resolve(recordingId + extension);
+            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            log.error("Recording video file upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
+            return uploadError("영상 파일 저장 실패: " + e.getMessage());
+        }
+
         RecordingVideo video = RecordingVideo.builder()
+            .recordingId(recordingId)
             .invoiceNo(normalizedInvoice)
             .orderNo(normalize(orderNo))
-            .fileName(safeFileName(file.getOriginalFilename()))
+            .fileName(originalFileName)
+            .localPath(target.toString())
+            .videoUrl(streamUrl(recordingId))
             .videoFormat(normalize(videoFormat))
             .mode(normalize(mode))
             .status(normalize(status) != null ? normalize(status) : "SAVED")
@@ -113,17 +133,18 @@ public class RecordingVideoController {
             .memo(normalize(memo))
             .build();
 
-        RecordingVideo saved = recordingVideoRepository.save(video);
-        String extension = extensionFromFileName(video.getFileName());
-        Path targetDir = storageRoot().resolve(safeFileName(normalizedInvoice));
-        Files.createDirectories(targetDir);
-        Path target = targetDir.resolve(saved.getRecordingId() + extension);
-        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-
-        saved.setLocalPath(target.toString());
-        saved.setVideoUrl(streamUrl(saved.getRecordingId()));
-        saved = recordingVideoRepository.save(saved);
-        return ResponseEntity.ok(Map.of("success", true, "video", RecordingVideoDto.from(saved)));
+        try {
+            RecordingVideo saved = recordingVideoRepository.save(video);
+            return ResponseEntity.ok(Map.of("success", true, "video", RecordingVideoDto.from(saved)));
+        } catch (DataAccessException e) {
+            deleteQuietly(target);
+            log.error("Recording video DB save failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
+            return uploadError("영상 DB 저장 실패: " + rootMessage(e));
+        } catch (RuntimeException e) {
+            deleteQuietly(target);
+            log.error("Recording video upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
+            return uploadError("영상 업로드 처리 실패: " + rootMessage(e));
+        }
     }
 
     @GetMapping
@@ -185,6 +206,30 @@ public class RecordingVideoController {
             : Path.of(System.getProperty("java.io.tmpdir"), "recording-videos");
         Files.createDirectories(root);
         return root;
+    }
+
+    private ResponseEntity<Map<String, Object>> uploadError(String message) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+            "success", false,
+            "message", normalize(message) != null ? message : "영상 업로드 실패"
+        ));
+    }
+
+    private void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // The upload already failed; a leftover temp video should not hide the real cause.
+        }
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message != null && !message.isBlank() ? message : throwable.getClass().getSimpleName();
     }
 
     private String streamUrl(UUID recordingId) {
