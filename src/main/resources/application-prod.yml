@@ -21,8 +21,8 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 100MB
-      max-request-size: 100MB
+      max-file-size: ${RECORDING_VIDEO_MAX_FILE_SIZE:1024MB}
+      max-request-size: ${RECORDING_VIDEO_MAX_REQUEST_SIZE:1024MB}
       file-size-threshold: 10MB
   
   # 프로덕션 데이터베이스 (Railway PostgreSQL)
@@ -133,3 +133,7 @@ tracking:
       base-url: ${POST_OFFICE_DELIVERY_AREA_BASE_URL:https://biz.epost.go.kr/KpostPortal/openapi}
       regkey: ${POST_OFFICE_DELIVERY_AREA_REGKEY:}
       mdiv: ${POST_OFFICE_DELIVERY_AREA_MDIV:1}
+
+recording:
+  video:
+    storage-dir: ${RECORDING_VIDEO_STORAGE_DIR:}
