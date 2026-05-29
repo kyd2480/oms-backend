@@ -17,8 +17,8 @@ FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
-# wget 설치 (헬스체크용)
-RUN apk add --no-cache wget
+# wget 설치 (헬스체크용), su-exec 설치 (권한 조정 후 비root 실행)
+RUN apk add --no-cache wget su-exec
 
 # 비root 사용자 생성 (보안)
 RUN addgroup -g 1001 spring && \
@@ -26,9 +26,8 @@ RUN addgroup -g 1001 spring && \
 
 # JAR 파일 복사
 COPY --from=builder /app/build/libs/*.jar app.jar
-
-# 사용자 전환
-USER spring:spring
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # PORT 환경변수 노출
 ENV PORT=8091
@@ -36,5 +35,5 @@ ENV PORT=8091
 # Railway는 자체 healthcheck를 수행하므로 제거
 # HEALTHCHECK 제거됨
 
-# 시작 명령 (안정성 최적화)
-CMD ["sh", "-c", "java -Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=prod -Dserver.port=${PORT} -Duser.timezone=Asia/Seoul -jar app.jar"]
+# 시작 명령 (Volume 권한 조정 후 비root 앱 실행)
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
