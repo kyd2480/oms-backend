@@ -190,9 +190,10 @@ public class RecordingVideoController {
 
         Resource resource = new FileSystemResource(path);
         MediaType contentType = mediaTypeFor(video.getFileName(), path);
+        String downloadName = safeFileName(video.getRecordingId() + extensionFromFileName(video.getFileName()));
         return ResponseEntity.ok()
             .contentType(contentType)
-            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + safeFileName(video.getFileName()) + "\"")
+            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + downloadName + "\"")
             .body(resource);
     }
 
