@@ -8,7 +8,6 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.ResourceRegion;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRange;
@@ -29,6 +28,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -45,6 +45,8 @@ import java.util.UUID;
 @CrossOrigin(origins = "*")
 @Slf4j
 public class RecordingVideoController {
+
+    private static final long STREAM_CHUNK_SIZE = 4L * 1024L * 1024L;
 
     private final RecordingVideoRepository recordingVideoRepository;
 
@@ -199,24 +201,26 @@ public class RecordingVideoController {
             return ResponseEntity.notFound().build();
         }
 
-        Resource resource = new FileSystemResource(path);
+        long contentLength = Files.size(path);
         MediaType contentType = mediaTypeFor(video.getFileName(), path);
         String downloadName = safeFileName(video.getRecordingId() + extensionFromFileName(video.getFileName()));
-        long contentLength = resource.contentLength();
         List<HttpRange> ranges = requestHeaders.getRange();
         if (!ranges.isEmpty()) {
             HttpRange range = ranges.get(0);
             long start = range.getRangeStart(contentLength);
-            long end = range.getRangeEnd(contentLength);
-            long rangeLength = Math.min(end - start + 1, contentLength - start);
-            ResourceRegion region = new ResourceRegion(resource, start, rangeLength);
+            long requestedEnd = range.getRangeEnd(contentLength);
+            long end = Math.min(requestedEnd, Math.min(contentLength - 1, start + STREAM_CHUNK_SIZE - 1));
+            byte[] bytes = readRange(path, start, end);
             return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
                 .contentType(contentType)
+                .contentLength(bytes.length)
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                .header(HttpHeaders.CONTENT_RANGE, "bytes " + start + "-" + end + "/" + contentLength)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + downloadName + "\"")
-                .body(region);
+                .body(bytes);
         }
 
+        Resource resource = new FileSystemResource(path);
         return ResponseEntity.ok()
             .contentType(contentType)
             .contentLength(contentLength)
@@ -344,6 +348,37 @@ public class RecordingVideoController {
             return null;
         }
         return path;
+    }
+
+    private byte[] readRange(Path path, long start, long end) throws IOException {
+        int length = Math.toIntExact(end - start + 1);
+        byte[] buffer = new byte[length];
+        try (InputStream input = Files.newInputStream(path)) {
+            long skipped = input.skip(start);
+            while (skipped < start) {
+                long next = input.skip(start - skipped);
+                if (next <= 0) {
+                    break;
+                }
+                skipped += next;
+            }
+
+            int offset = 0;
+            while (offset < length) {
+                int read = input.read(buffer, offset, length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+
+            if (offset == length) {
+                return buffer;
+            }
+            byte[] trimmed = new byte[offset];
+            System.arraycopy(buffer, 0, trimmed, 0, offset);
+            return trimmed;
+        }
     }
 
     private RecordingVideoDto toDto(RecordingVideo video) {
