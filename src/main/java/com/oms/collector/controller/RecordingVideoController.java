@@ -77,7 +77,7 @@ public class RecordingVideoController {
             .build();
 
         RecordingVideo saved = recordingVideoRepository.save(video);
-        return ResponseEntity.ok(Map.of("success", true, "video", RecordingVideoDto.from(saved)));
+        return ResponseEntity.ok(Map.of("success", true, "video", toDto(saved)));
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -103,28 +103,12 @@ public class RecordingVideoController {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "업로드 파일이 없습니다."));
         }
 
-        UUID recordingId = UUID.randomUUID();
         String originalFileName = safeFileName(file.getOriginalFilename());
         String extension = extensionFromFileName(originalFileName);
-        Path target;
-        try {
-            Path targetDir = datedStorageDir(storageRoot());
-            Files.createDirectories(targetDir);
-            String targetFileName = safeFileName(normalizedInvoice) + "_" + recordingId + extension;
-            target = targetDir.resolve(targetFileName);
-            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            log.error("Recording video file upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
-            return uploadError("영상 파일 저장 실패: " + errorSummary(e) + " / " + storageDiagnostics());
-        }
-
         RecordingVideo video = RecordingVideo.builder()
-            .recordingId(recordingId)
             .invoiceNo(normalizedInvoice)
             .orderNo(normalize(orderNo))
             .fileName(originalFileName)
-            .localPath(target.toString())
-            .videoUrl(streamUrl(recordingId))
             .videoFormat(normalize(videoFormat))
             .mode(normalize(mode))
             .status(normalize(status) != null ? normalize(status) : "SAVED")
@@ -136,9 +120,32 @@ public class RecordingVideoController {
             .memo(normalize(memo))
             .build();
 
+        RecordingVideo saved;
         try {
-            RecordingVideo saved = recordingVideoRepository.save(video);
-            return ResponseEntity.ok(Map.of("success", true, "video", RecordingVideoDto.from(saved)));
+            saved = recordingVideoRepository.saveAndFlush(video);
+        } catch (DataAccessException e) {
+            log.error("Recording video DB save failed before file copy: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
+            return uploadError("영상 DB 저장 실패: " + rootMessage(e));
+        }
+
+        Path target;
+        try {
+            Path targetDir = datedStorageDir(storageRoot());
+            Files.createDirectories(targetDir);
+            String targetFileName = safeFileName(normalizedInvoice) + "_" + saved.getRecordingId() + extension;
+            target = targetDir.resolve(targetFileName);
+            Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            recordingVideoRepository.deleteById(saved.getRecordingId());
+            log.error("Recording video file upload failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
+            return uploadError("영상 파일 저장 실패: " + errorSummary(e) + " / " + storageDiagnostics());
+        }
+
+        try {
+            saved.setLocalPath(target.toString());
+            saved.setVideoUrl(streamUrl(saved.getRecordingId()));
+            saved = recordingVideoRepository.save(saved);
+            return ResponseEntity.ok(Map.of("success", true, "video", toDto(saved)));
         } catch (DataAccessException e) {
             deleteQuietly(target);
             log.error("Recording video DB save failed: invoiceNo={}, message={}", normalizedInvoice, e.getMessage(), e);
@@ -171,14 +178,18 @@ public class RecordingVideoController {
         } else {
             videos = List.of();
         }
-        return ResponseEntity.ok(videos.stream().map(RecordingVideoDto::from).toList());
+        return ResponseEntity.ok(videos.stream().map(this::toDto).toList());
     }
 
     @GetMapping("/{recordingId}/stream")
     @Transactional(readOnly = true)
     public ResponseEntity<Resource> stream(@PathVariable UUID recordingId) {
         RecordingVideo video = recordingVideoRepository.findById(recordingId)
-            .orElseThrow(() -> new IllegalArgumentException("녹화 영상을 찾을 수 없습니다: " + recordingId));
+            .or(() -> recordingVideoRepository.findFirstByVideoUrlContaining(recordingId.toString()))
+            .orElse(null);
+        if (video == null) {
+            return ResponseEntity.notFound().build();
+        }
         String pathText = normalize(video.getLocalPath());
         if (pathText == null) {
             return ResponseEntity.notFound().build();
@@ -276,6 +287,11 @@ public class RecordingVideoController {
             .toUriString();
     }
 
+    private RecordingVideoDto toDto(RecordingVideo video) {
+        String videoUrl = video.getRecordingId() != null ? streamUrl(video.getRecordingId()) : video.getVideoUrl();
+        return RecordingVideoDto.from(video, videoUrl);
+    }
+
     private String safeFileName(String value) {
         String normalized = normalize(value);
         if (normalized == null) {
@@ -341,14 +357,14 @@ public class RecordingVideoController {
         String memo,
         String createdAt
     ) {
-        static RecordingVideoDto from(RecordingVideo video) {
+        static RecordingVideoDto from(RecordingVideo video, String videoUrl) {
             return new RecordingVideoDto(
                 video.getRecordingId() != null ? video.getRecordingId().toString() : null,
                 video.getInvoiceNo(),
                 video.getOrderNo(),
                 video.getFileName(),
                 video.getLocalPath(),
-                video.getVideoUrl(),
+                videoUrl,
                 video.getVideoFormat(),
                 video.getMode(),
                 video.getStatus(),

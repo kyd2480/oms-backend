@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -20,4 +21,6 @@ public interface RecordingVideoRepository extends JpaRepository<RecordingVideo, 
     List<RecordingVideo> findTop50ByOrderNoAndVideoUrlIsNotNullOrderByCreatedAtDesc(String orderNo);
 
     List<RecordingVideo> findTop1000ByCreatedAtBeforeOrderByCreatedAtAsc(LocalDateTime cutoff);
+
+    Optional<RecordingVideo> findFirstByVideoUrlContaining(String value);
 }
