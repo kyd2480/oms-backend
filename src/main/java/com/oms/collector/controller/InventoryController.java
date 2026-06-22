@@ -62,7 +62,9 @@ public class InventoryController {
     @PostMapping("/products")
     public ResponseEntity<ProductDto> createProduct(@RequestBody ProductDto dto) {
         log.info("🆕 상품 등록: {}", dto.getProductName());
-        String sku = dto.getSku() != null && !dto.getSku().isBlank() ? dto.getSku().trim() : dto.getBarcode();
+        String sku = dto.getSku() != null && !dto.getSku().isBlank()
+            ? dto.getSku().trim()
+            : "AUTO-" + UUID.randomUUID();
         if (sku == null || sku.isBlank()) {
             return ResponseEntity.badRequest().build();
         }

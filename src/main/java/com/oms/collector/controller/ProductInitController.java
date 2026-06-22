@@ -18,8 +18,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 상품 초기화 Controller (CSV 업로드)
@@ -88,8 +90,20 @@ public class ProductInitController {
         }
 
         try {
-            List<Product> products = parseCsvFile(file);
-            log.info("CSV 파싱 완료: {}개 상품", products.size());
+            List<Product> parsedProducts = parseCsvFile(file);
+            int parsedCount = parsedProducts.size();
+            Map<String, Product> uniqueProductsBySku = new LinkedHashMap<>();
+            int duplicateInCsvCount = 0;
+            for (Product product : parsedProducts) {
+                String uniqueKey = productUniqueKey(product);
+                if (uniqueProductsBySku.containsKey(uniqueKey)) {
+                    duplicateInCsvCount++;
+                    continue;
+                }
+                uniqueProductsBySku.put(uniqueKey, product);
+            }
+            List<Product> products = new ArrayList<>(uniqueProductsBySku.values());
+            log.info("CSV 파싱 완료: {}개 상품, 내부 중복 {}개 제외", parsedCount, duplicateInCsvCount);
 
             int chunkSize = 1000;
             int newCount = 0;
@@ -102,7 +116,7 @@ public class ProductInitController {
 
                 List<Product> toSave = new ArrayList<>();
                 for (Product product : chunk) {
-                    if (productRepository.existsBySku(product.getSku())) {
+                    if (isExistingProduct(product)) {
                         updateCount++;
                     } else {
                         toSave.add(product);
@@ -121,8 +135,8 @@ public class ProductInitController {
             }
 
             String message = String.format(
-                "CSV 업로드 완료\n신규: %,d개\n기존: %,d개\n총: %,d개",
-                newCount, updateCount, products.size()
+                "CSV 업로드 완료\n신규: %,d개\n기존/건너뜀: %,d개\nCSV 내부 중복 제외: %,d개\n총 읽은 행: %,d개",
+                newCount, updateCount, duplicateInCsvCount, parsedCount
             );
 
             log.info(message);
@@ -182,7 +196,7 @@ public class ProductInitController {
                     throw new IllegalArgumentException(rowNo + "행 필수값 누락: " + String.join(", ", missing));
                 }
 
-                String sku = !optionCode.isBlank() ? optionCode : barcode;
+                String sku = !optionCode.isBlank() ? optionCode : generateInternalSku();
 
                 Product product = Product.builder()
                     .sku(sku)
@@ -273,6 +287,27 @@ public class ProductInitController {
             cleaned = cleaned.substring(1, cleaned.length() - 1);
         }
         return cleaned.trim();
+    }
+
+    private String generateInternalSku() {
+        return "AUTO-" + UUID.randomUUID();
+    }
+
+    private String productUniqueKey(Product product) {
+        String optionCode = product.getOptionCode();
+        if (optionCode != null && !optionCode.isBlank()) {
+            return "OPTION:" + optionCode.trim();
+        }
+        return "BARCODE:" + product.getBarcode();
+    }
+
+    private boolean isExistingProduct(Product product) {
+        String optionCode = product.getOptionCode();
+        if (optionCode != null && !optionCode.isBlank() && productRepository.existsBySku(product.getSku())) {
+            return true;
+        }
+        return productRepository.findByBarcodeOrBarcode2(product.getBarcode()).stream()
+            .anyMatch(existing -> Boolean.TRUE.equals(existing.getIsActive()));
     }
 
     private BigDecimal parseMoney(String value) {
