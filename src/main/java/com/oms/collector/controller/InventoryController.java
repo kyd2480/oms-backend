@@ -175,6 +175,85 @@ public class InventoryController {
         }
     }
 
+    @PostMapping("/warehouse-batch")
+    public ResponseEntity<?> processWarehouseBatch(@RequestBody InventoryDto.WarehouseBatchRequest request) {
+        String type = normalizeBatchText(request.getType()).toUpperCase();
+        String warehouse = normalizeBatchText(request.getWarehouse());
+        List<InventoryDto.WarehouseBatchItemRequest> items = request.getItems() != null
+            ? request.getItems()
+            : List.of();
+
+        if (!type.equals("IN") && !type.equals("OUT")) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "입출고 유형은 IN 또는 OUT이어야 합니다."));
+        }
+        if (warehouse.isBlank()) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "창고를 선택해주세요."));
+        }
+        if (items.isEmpty()) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "처리할 CSV 행이 없습니다."));
+        }
+
+        log.info("📦 CSV {} 배치 처리 요청: 창고={}, {}건", type, warehouse, items.size());
+
+        List<InventoryDto.WarehouseBatchItemResult> results = new ArrayList<>();
+        int successCount = 0;
+        for (int i = 0; i < items.size(); i++) {
+            InventoryDto.WarehouseBatchItemRequest item = items.get(i);
+            int rowNo = item.getRowNo() != null ? item.getRowNo() : i + 2;
+            String barcode = normalizeBatchText(item.getBarcode());
+            Integer quantity = item.getQuantity();
+
+            if (barcode.isBlank()) {
+                results.add(batchFailure(rowNo, barcode, quantity, "바코드가 비어있습니다."));
+                continue;
+            }
+            if (quantity == null || quantity <= 0) {
+                results.add(batchFailure(rowNo, barcode, quantity, "수량은 1 이상이어야 합니다."));
+                continue;
+            }
+
+            try {
+                Product product = productRepository.findByBarcode(barcode)
+                    .filter(p -> Boolean.TRUE.equals(p.getIsActive()))
+                    .orElseThrow(() -> new IllegalArgumentException("등록된 활성 상품을 찾을 수 없습니다."));
+
+                String notes = String.format("CSV %s 업로드 | 행:%d%s",
+                    type.equals("IN") ? "입고" : "출고",
+                    rowNo,
+                    request.getNotes() != null && !request.getNotes().isBlank() ? " | " + request.getNotes() : "");
+
+                Product saved = type.equals("IN")
+                    ? inventoryService.processInboundWithWarehouse(product.getProductId(), quantity, warehouse,
+                        product.getWarehouseLocation(), notes)
+                    : inventoryService.processOutboundWithWarehouse(product.getProductId(), quantity, warehouse,
+                        null, notes);
+
+                successCount++;
+                results.add(InventoryDto.WarehouseBatchItemResult.builder()
+                    .rowNo(rowNo)
+                    .barcode(barcode)
+                    .quantity(quantity)
+                    .productId(saved.getProductId())
+                    .productName(saved.getProductName())
+                    .sku(saved.getSku())
+                    .success(true)
+                    .message("처리 완료")
+                    .build());
+            } catch (Exception e) {
+                results.add(batchFailure(rowNo, barcode, quantity, e.getMessage()));
+            }
+        }
+
+        return ResponseEntity.ok(InventoryDto.WarehouseBatchResponse.builder()
+            .type(type)
+            .warehouse(warehouse)
+            .requestedCount(items.size())
+            .successCount(successCount)
+            .failureCount(items.size() - successCount)
+            .results(results)
+            .build());
+    }
+
     @PostMapping("/inbound")
     public ResponseEntity<ProductDto> processInbound(@RequestBody InventoryDto.InboundRequest request) {
         log.info("📦 입고 처리 요청: 상품 ID={}, 수량={}", request.getProductId(), request.getQuantity());
@@ -429,6 +508,16 @@ public class InventoryController {
         }
     }
 
+    private static InventoryDto.WarehouseBatchItemResult batchFailure(Integer rowNo, String barcode, Integer quantity, String message) {
+        return InventoryDto.WarehouseBatchItemResult.builder()
+            .rowNo(rowNo)
+            .barcode(barcode)
+            .quantity(quantity)
+            .success(false)
+            .message(message != null && !message.isBlank() ? message : "처리 실패")
+            .build();
+    }
+
     private static void addProductCodeMapping(Map<String, Set<UUID>> target, String value, UUID productId) {
         String code = normalizeCode(value);
         if (!code.isBlank()) {
@@ -438,6 +527,10 @@ public class InventoryController {
 
     private static String normalizeCode(String value) {
         return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    private static String normalizeBatchText(String value) {
+        return value == null ? "" : value.replace("\uFEFF", "").trim();
     }
 
     private static String extractInvoiceNo(String memo) {

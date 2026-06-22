@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -99,6 +100,58 @@ public class InventoryDto {
         private String warehouseLocation;
         private String note;
         private String reason;
+    }
+
+    /**
+     * CSV 업로드용 창고 입/출고 배치 요청
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WarehouseBatchRequest {
+        private String type; // IN | OUT
+        private String warehouse;
+        private String notes;
+        private List<WarehouseBatchItemRequest> items;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WarehouseBatchItemRequest {
+        private Integer rowNo;
+        private String barcode;
+        private Integer quantity;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WarehouseBatchResponse {
+        private String type;
+        private String warehouse;
+        private Integer requestedCount;
+        private Integer successCount;
+        private Integer failureCount;
+        private List<WarehouseBatchItemResult> results;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WarehouseBatchItemResult {
+        private Integer rowNo;
+        private String barcode;
+        private Integer quantity;
+        private UUID productId;
+        private String productName;
+        private String sku;
+        private Boolean success;
+        private String message;
     }
     
     /**
