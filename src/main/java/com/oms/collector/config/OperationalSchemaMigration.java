@@ -98,12 +98,28 @@ public class OperationalSchemaMigration {
     }
 
     private void migrateProducts() {
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_code VARCHAR(100)");
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_name VARCHAR(255)");
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)");
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS note VARCHAR(500)");
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)");
-        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)");
+        migrateProductsForSchema("public");
+        jdbcTemplate.queryForList(
+            "SELECT schema_name FROM information_schema.schemata " +
+            "WHERE schema_name NOT IN ('public','information_schema','pg_catalog','pg_toast') " +
+            "  AND schema_name NOT LIKE 'pg_%'",
+            String.class
+        ).forEach(this::migrateProductsForSchema);
+    }
+
+    private void migrateProductsForSchema(String schema) {
+        if (schema == null || !schema.matches("[a-zA-Z_][a-zA-Z0-9_]{0,62}")) {
+            return;
+        }
+        String prefix = "\"%s\".".formatted(schema);
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS option_code VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS option_name VARCHAR(255)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS note VARCHAR(500)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ALTER COLUMN barcode2 TYPE VARCHAR(100) USING barcode2::VARCHAR".formatted(prefix));
+        execute("ALTER TABLE %sproducts ADD COLUMN IF NOT EXISTS color VARCHAR(100)".formatted(prefix));
+        execute("ALTER TABLE %sproducts ALTER COLUMN color TYPE VARCHAR(100) USING color::VARCHAR".formatted(prefix));
     }
 
     private void migratePrintTypes() {
@@ -330,3 +346,6 @@ public class OperationalSchemaMigration {
         jdbcTemplate.execute(sql);
     }
 }
+
+
+

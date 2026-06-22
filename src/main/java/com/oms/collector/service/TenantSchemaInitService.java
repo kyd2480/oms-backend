@@ -315,7 +315,9 @@ public class TenantSchemaInitService {
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)");
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS note VARCHAR(500)");
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)");
+        exec(s, "products", "ALTER TABLE \"%s\".products ALTER COLUMN barcode2 TYPE VARCHAR(100) USING barcode2::VARCHAR");
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS color VARCHAR(100)");
+        exec(s, "products", "ALTER TABLE \"%s\".products ALTER COLUMN color TYPE VARCHAR(100) USING color::VARCHAR");
 
         // operational_settings
         execRaw(s, String.format("""
@@ -614,3 +616,5 @@ public class TenantSchemaInitService {
 
     private record ColumnMeta(String columnName, String dataType, String udtName, int ordinalPosition) {}
 }
+
+
