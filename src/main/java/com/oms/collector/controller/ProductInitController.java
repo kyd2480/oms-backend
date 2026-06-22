@@ -32,9 +32,9 @@ import java.util.Map;
 public class ProductInitController {
 
     private static final List<String> PRODUCT_CSV_HEADERS = List.of(
-        "옵션코드", "공급처명", "상품명", "옵션명", "바코드", "카테고리", "위치", "원가", "판매가", "비고"
+        "옵션코드", "공급처명", "상품명", "옵션명", "색상", "바코드", "바코드2", "카테고리", "위치", "원가", "판매가", "비고"
     );
-    private static final List<String> REQUIRED_PRODUCT_CSV_HEADERS = List.of("옵션코드", "상품명", "옵션명", "바코드");
+    private static final List<String> REQUIRED_PRODUCT_CSV_HEADERS = List.of("상품명", "옵션명", "바코드");
 
     private final ProductRepository productRepository;
 
@@ -165,7 +165,9 @@ public class ProductInitController {
                 String vendorName = getField(fields, headerMap, "공급처명");
                 String productName = getField(fields, headerMap, "상품명");
                 String optionName = getField(fields, headerMap, "옵션명");
+                String color = getField(fields, headerMap, "색상");
                 String barcode = getField(fields, headerMap, "바코드");
+                String barcode2 = getField(fields, headerMap, "바코드2");
                 String category = getField(fields, headerMap, "카테고리");
                 String location = getField(fields, headerMap, "위치");
                 BigDecimal costPrice = parseMoney(getField(fields, headerMap, "원가"));
@@ -173,7 +175,6 @@ public class ProductInitController {
                 String note = getField(fields, headerMap, "비고");
 
                 List<String> missing = new ArrayList<>();
-                if (optionCode.isBlank()) missing.add("옵션코드");
                 if (productName.isBlank()) missing.add("상품명");
                 if (optionName.isBlank()) missing.add("옵션명");
                 if (barcode.isBlank()) missing.add("바코드");
@@ -181,12 +182,16 @@ public class ProductInitController {
                     throw new IllegalArgumentException(rowNo + "행 필수값 누락: " + String.join(", ", missing));
                 }
 
+                String sku = !optionCode.isBlank() ? optionCode : barcode;
+
                 Product product = Product.builder()
-                    .sku(optionCode)
+                    .sku(sku)
                     .barcode(barcode)
-                    .optionCode(optionCode)
+                    .barcode2(barcode2)
+                    .optionCode(optionCode.isBlank() ? null : optionCode)
                     .productName(productName)
                     .optionName(optionName)
+                    .color(color)
                     .vendorName(vendorName)
                     .category(category)
                     .costPrice(costPrice)

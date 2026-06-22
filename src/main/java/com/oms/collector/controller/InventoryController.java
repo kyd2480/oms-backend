@@ -62,15 +62,21 @@ public class InventoryController {
     @PostMapping("/products")
     public ResponseEntity<ProductDto> createProduct(@RequestBody ProductDto dto) {
         log.info("🆕 상품 등록: {}", dto.getProductName());
-        if (productRepository.existsBySku(dto.getSku())) {
+        String sku = dto.getSku() != null && !dto.getSku().isBlank() ? dto.getSku().trim() : dto.getBarcode();
+        if (sku == null || sku.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (productRepository.existsBySku(sku)) {
             return ResponseEntity.badRequest().build();
         }
         Product product = Product.builder()
-            .sku(dto.getSku())
+            .sku(sku)
             .productName(dto.getProductName())
             .barcode(dto.getBarcode())
-            .optionCode(dto.getOptionCode() != null ? dto.getOptionCode() : dto.getSku())
+            .barcode2(dto.getBarcode2())
+            .optionCode(dto.getOptionCode() != null && !dto.getOptionCode().isBlank() ? dto.getOptionCode() : null)
             .optionName(dto.getOptionName())
+            .color(dto.getColor())
             .vendorName(dto.getVendorName())
             .category(dto.getCategory())
             .costPrice(dto.getCostPrice())
@@ -97,8 +103,10 @@ public class InventoryController {
             .map(product -> {
                 product.setProductName(dto.getProductName());
                 product.setBarcode(dto.getBarcode());
-                product.setOptionCode(dto.getOptionCode() != null ? dto.getOptionCode() : product.getOptionCode());
+                product.setBarcode2(dto.getBarcode2());
+                product.setOptionCode(dto.getOptionCode() != null && !dto.getOptionCode().isBlank() ? dto.getOptionCode() : null);
                 product.setOptionName(dto.getOptionName());
+                product.setColor(dto.getColor());
                 product.setVendorName(dto.getVendorName());
                 product.setCategory(dto.getCategory());
                 product.setCostPrice(dto.getCostPrice());
@@ -213,8 +221,9 @@ public class InventoryController {
             }
 
             try {
-                Product product = productRepository.findByBarcode(barcode)
+                Product product = productRepository.findByBarcodeOrBarcode2(barcode).stream()
                     .filter(p -> Boolean.TRUE.equals(p.getIsActive()))
+                    .findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("등록된 활성 상품을 찾을 수 없습니다."));
 
                 String notes = String.format("CSV %s 업로드 | 행:%d%s",
@@ -341,6 +350,7 @@ public class InventoryController {
                 Set<String> codes = new LinkedHashSet<>();
                 addIfPresent(codes, product.getSku());
                 addIfPresent(codes, product.getBarcode());
+                addIfPresent(codes, product.getBarcode2());
                 addIfPresent(codes, product.getOptionCode());
                 if (codes.isEmpty()) {
                     return ResponseEntity.ok(List.<InventoryDto.UnshippedOrderItemResponse>of());
@@ -369,6 +379,7 @@ public class InventoryController {
             quantities.put(productId, 0);
             addProductCodeMapping(codeToProductIds, product.getSku(), productId);
             addProductCodeMapping(codeToProductIds, product.getBarcode(), productId);
+            addProductCodeMapping(codeToProductIds, product.getBarcode2(), productId);
             addProductCodeMapping(codeToProductIds, product.getOptionCode(), productId);
         }
 
@@ -442,8 +453,10 @@ public class InventoryController {
             .sku(product.getSku())
             .productName(product.getProductName())
             .barcode(product.getBarcode())
+            .barcode2(product.getBarcode2())
             .optionCode(product.getOptionCode())
             .optionName(product.getOptionName())
+            .color(product.getColor())
             .vendorName(product.getVendorName())
             .category(product.getCategory())
             .costPrice(product.getCostPrice())

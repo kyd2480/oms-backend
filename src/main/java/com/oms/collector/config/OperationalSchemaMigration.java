@@ -102,6 +102,8 @@ public class OperationalSchemaMigration {
         execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS option_name VARCHAR(255)");
         execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)");
         execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS note VARCHAR(500)");
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)");
+        execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(100)");
     }
 
     private void migratePrintTypes() {

@@ -22,8 +22,10 @@ public class ProductDto {
     private String sku;
     private String productName;
     private String barcode;
+    private String barcode2;
     private String optionCode;
     private String optionName;
+    private String color;
     private String vendorName;
     private String category;
     private BigDecimal costPrice;

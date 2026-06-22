@@ -41,6 +41,8 @@ public class InventoryApiController {
         public String  productId;
         public String  sku;
         public String  barcode;
+        public String  barcode2;
+        public String  color;
         public String  productName;
         public int     totalStock;
         public int     availableStock;
@@ -55,6 +57,8 @@ public class InventoryApiController {
             this.productId             = p.getProductId().toString();
             this.sku                   = p.getSku();
             this.barcode               = p.getBarcode();
+            this.barcode2              = p.getBarcode2();
+            this.color                 = p.getColor();
             this.productName           = p.getProductName();
             this.totalStock            = p.getTotalStock()            != null ? p.getTotalStock()            : 0;
             this.availableStock        = p.getAvailableStock()        != null ? p.getAvailableStock()        : 0;
@@ -115,7 +119,8 @@ public class InventoryApiController {
         List<Product> found = productRepository.searchProducts(barcode);
         Product product = found.stream()
             .filter(p -> barcode.equalsIgnoreCase(p.getSku())
-                      || barcode.equalsIgnoreCase(p.getBarcode()))
+                      || barcode.equalsIgnoreCase(p.getBarcode())
+                      || barcode.equalsIgnoreCase(p.getBarcode2()))
             .findFirst()
             .orElse(found.isEmpty() ? null : found.get(0));
 

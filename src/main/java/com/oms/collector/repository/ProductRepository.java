@@ -15,67 +15,46 @@ import java.util.UUID;
  */
 @Repository
 public interface ProductRepository extends JpaRepository<Product, UUID> {
-    
-    /**
-     * SKU로 상품 조회
-     */
+
     Optional<Product> findBySku(String sku);
-    
-    /**
-     * 바코드로 상품 조회
-     */
+
     Optional<Product> findByBarcode(String barcode);
-    
-    /**
-     * SKU 존재 여부
-     */
+
+    Optional<Product> findByBarcode2(String barcode2);
+
+    @Query("SELECT p FROM Product p WHERE p.barcode = :barcode OR p.barcode2 = :barcode")
+    List<Product> findByBarcodeOrBarcode2(@Param("barcode") String barcode);
+
     boolean existsBySku(String sku);
-    
-    /**
-     * 활성 상품 목록
-     */
+
     List<Product> findByIsActiveTrueOrderByProductNameAsc();
-    
-    /**
-     * 재고 없는 상품 조회 (안전재고 제거 → out-of-stock과 동일)
-     */
+
     @Query("SELECT p FROM Product p WHERE p.availableStock = 0 AND p.isActive = true")
     List<Product> findLowStockProducts();
-    
-    /**
-     * 재고 없는 상품 조회
-     */
+
     @Query("SELECT p FROM Product p WHERE p.availableStock = 0 AND p.isActive = true")
     List<Product> findOutOfStockProducts();
-    
-    /**
-     * 카테고리별 상품 조회
-     */
+
     List<Product> findByCategoryAndIsActiveTrueOrderByProductNameAsc(String category);
-    
-    /**
-     * 상품명으로 검색
-     */
+
     List<Product> findByProductNameContainingIgnoreCaseAndIsActiveTrue(String keyword);
-    
-    /**
-     * SKU 또는 바코드로 검색
-     */
-    @Query("SELECT p FROM Product p WHERE (p.sku LIKE %:keyword% OR p.barcode LIKE %:keyword%) AND p.isActive = true")
+
+    @Query("SELECT p FROM Product p WHERE " +
+           "(p.sku LIKE %:keyword% OR p.barcode LIKE %:keyword% OR p.barcode2 LIKE %:keyword%) " +
+           "AND p.isActive = true")
     List<Product> findBySkuOrBarcodeContaining(String keyword);
-    
-    /**
-     * 통합 검색 (상품명, SKU, 바코드)
-     */
+
     @Query("SELECT p FROM Product p WHERE " +
            "(LOWER(p.productName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
            "OR LOWER(p.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "OR LOWER(p.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "OR LOWER(p.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.barcode2) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+           "OR LOWER(p.color) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
            "AND p.isActive = true " +
            "ORDER BY p.productName ASC")
     List<Product> searchProducts(String keyword);
 
-    @Query("SELECT p FROM Product p WHERE LOWER(p.sku) IN :codes OR LOWER(p.barcode) IN :codes")
+    @Query("SELECT p FROM Product p WHERE LOWER(p.sku) IN :codes OR LOWER(p.barcode) IN :codes OR LOWER(p.barcode2) IN :codes")
     List<Product> findBySkuOrBarcodeInLowercase(@Param("codes") List<String> codes);
 
     @Query("SELECT COUNT(p) FROM Product p WHERE COALESCE(p.availableStock, 0) < 0 AND p.isActive = true")

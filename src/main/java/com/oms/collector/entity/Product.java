@@ -39,6 +39,12 @@ public class Product {
     @Column(name = "barcode", length = 100)
     private String barcode;
 
+    @Column(name = "barcode2", length = 100)
+    private String barcode2;
+
+    @Column(name = "color", length = 100)
+    private String color;
+
     @Column(name = "option_code", length = 100)
     private String optionCode;
 

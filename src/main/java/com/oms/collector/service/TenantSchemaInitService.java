@@ -314,6 +314,8 @@ public class TenantSchemaInitService {
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS option_name VARCHAR(255)");
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(100)");
         exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS note VARCHAR(500)");
+        exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS barcode2 VARCHAR(100)");
+        exec(s, "products", "ALTER TABLE \"%s\".products ADD COLUMN IF NOT EXISTS color VARCHAR(100)");
 
         // operational_settings
         execRaw(s, String.format("""
