@@ -17,10 +17,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -105,6 +108,7 @@ public class ProductInitController {
             List<Product> products = new ArrayList<>(uniqueProductsBySku.values());
             log.info("CSV 파싱 완료: {}개 상품, 내부 중복 {}개 제외", parsedCount, duplicateInCsvCount);
 
+            ExistingProductKeys existingKeys = loadExistingProductKeys(products);
             int chunkSize = 1000;
             int newCount = 0;
             int updateCount = 0;
@@ -116,7 +120,7 @@ public class ProductInitController {
 
                 List<Product> toSave = new ArrayList<>();
                 for (Product product : chunk) {
-                    if (isExistingProduct(product)) {
+                    if (isExistingProduct(product, existingKeys)) {
                         updateCount++;
                     } else {
                         toSave.add(product);
@@ -301,13 +305,50 @@ public class ProductInitController {
         return "BARCODE:" + product.getBarcode();
     }
 
-    private boolean isExistingProduct(Product product) {
+    private ExistingProductKeys loadExistingProductKeys(List<Product> products) {
+        Set<String> lookupCodes = new HashSet<>();
+        for (Product product : products) {
+            String optionCode = product.getOptionCode();
+            if (optionCode != null && !optionCode.isBlank()) {
+                lookupCodes.add(normalizeKey(product.getSku()));
+            }
+            lookupCodes.add(normalizeKey(product.getBarcode()));
+        }
+
+        ExistingProductKeys keys = new ExistingProductKeys();
+        List<String> codes = lookupCodes.stream()
+            .filter(code -> !code.isBlank())
+            .toList();
+
+        int chunkSize = 1000;
+        for (int i = 0; i < codes.size(); i += chunkSize) {
+            int end = Math.min(i + chunkSize, codes.size());
+            for (Product existing : productRepository.findBySkuOrBarcodeInLowercase(codes.subList(i, end))) {
+                keys.skus.add(normalizeKey(existing.getSku()));
+                if (Boolean.TRUE.equals(existing.getIsActive())) {
+                    keys.barcodes.add(normalizeKey(existing.getBarcode()));
+                    keys.barcodes.add(normalizeKey(existing.getBarcode2()));
+                }
+            }
+        }
+        return keys;
+    }
+
+    private boolean isExistingProduct(Product product, ExistingProductKeys keys) {
         String optionCode = product.getOptionCode();
-        if (optionCode != null && !optionCode.isBlank() && productRepository.existsBySku(product.getSku())) {
+        if (optionCode != null && !optionCode.isBlank() && keys.skus.contains(normalizeKey(product.getSku()))) {
             return true;
         }
-        return productRepository.findByBarcodeOrBarcode2(product.getBarcode()).stream()
-            .anyMatch(existing -> Boolean.TRUE.equals(existing.getIsActive()));
+        return keys.barcodes.contains(normalizeKey(product.getBarcode()));
+    }
+
+    private String normalizeKey(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static class ExistingProductKeys {
+        private final Set<String> skus = new HashSet<>();
+        private final Set<String> barcodes = new HashSet<>();
     }
 
     private BigDecimal parseMoney(String value) {
