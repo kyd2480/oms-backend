@@ -9,11 +9,14 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -25,6 +28,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class ProductLocationController {
+
+    private static final int BATCH_SIZE = 1000;
     
     private final ProductRepository productRepository;
     
@@ -39,76 +44,31 @@ public class ProductLocationController {
             return ResponseEntity.badRequest().body(Map.of("error", "파일이 비어있습니다."));
         }
         
-        int successCount = 0;
-        int failCount = 0;
         List<String> failedBarcodes = new ArrayList<>();
         
         try {
-            // CSV 파일 읽기 (EUC-KR 인코딩)
-            Charset charset = Charset.forName("EUC-KR");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), charset));
-            
-            String line;
-            int lineNumber = 0;
-            
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                
-                // 헤더 행 스킵 (첫 줄)
-                if (lineNumber == 1) {
+            Map<String, String> locationsByBarcode = parseRows(file, failedBarcodes);
+            Map<String, Product> productsByBarcode = loadProductsByBarcode(new ArrayList<>(locationsByBarcode.keySet()));
+            List<Product> updates = new ArrayList<>();
+
+            for (Map.Entry<String, String> entry : locationsByBarcode.entrySet()) {
+                Product product = productsByBarcode.get(normalize(entry.getKey()));
+                if (product == null) {
+                    failedBarcodes.add(entry.getKey());
                     continue;
                 }
-                
-                // 빈 줄 스킵
-                if (line.trim().isEmpty()) {
-                    continue;
-                }
-                
-                try {
-                    // CSV 파싱
-                    String[] fields = parseCsvLine(line);
-                    
-                    if (fields.length < 2) {
-                        log.warn("라인 {}: 필드 부족 - {}", lineNumber, line);
-                        continue;
-                    }
-                    
-                    // A열: 바코드, B열: 위치
-                    String barcode = cleanField(fields[0]);
-                    String location = cleanField(fields[1]);
-                    
-                    if (barcode.isEmpty()) {
-                        log.warn("라인 {}: 바코드 없음", lineNumber);
-                        continue;
-                    }
-                    
-                    // 바코드로 상품 검색
-                    Product product = productRepository.findByBarcode(barcode).orElse(null);
-                    
-                    if (product == null) {
-                        log.warn("라인 {}: 바코드 [{}] 상품 없음", lineNumber, barcode);
-                        failCount++;
-                        failedBarcodes.add(barcode);
-                        continue;
-                    }
-                    
-                    // 위치 업데이트
-                    product.setWarehouseLocation(location);
-                    productRepository.save(product);
-                    
-                    successCount++;
-                    
-                    if (successCount % 100 == 0) {
-                        log.info("진행: {}개 완료", successCount);
-                    }
-                    
-                } catch (Exception e) {
-                    log.error("라인 {} 처리 실패: {}", lineNumber, e.getMessage());
-                    failCount++;
-                }
+                product.setWarehouseLocation(entry.getValue());
+                updates.add(product);
             }
-            
-            reader.close();
+
+            for (int i = 0; i < updates.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, updates.size());
+                productRepository.saveAll(updates.subList(i, end));
+                log.info("상품 위치 배치 저장: {}/{}", end, updates.size());
+            }
+
+            int successCount = updates.size();
+            int failCount = failedBarcodes.size();
             
             log.info("✅ 위치 업데이트 완료 - 성공: {}개, 실패: {}개", successCount, failCount);
             
@@ -127,6 +87,60 @@ public class ProductLocationController {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", "처리 실패: " + e.getMessage()));
         }
+    }
+
+    private Map<String, String> parseRows(MultipartFile file, List<String> failures) throws Exception {
+        Map<String, String> rows = new LinkedHashMap<>();
+        String content = readCsvContent(file);
+        try (BufferedReader reader = new BufferedReader(new StringReader(content))) {
+            String line;
+            int lineNumber = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                if (lineNumber == 1 || line.isBlank()) continue;
+
+                String[] fields = parseCsvLine(line);
+                if (fields.length < 2) {
+                    failures.add(lineNumber + "행(형식 오류)");
+                    continue;
+                }
+                String barcode = cleanField(fields[0]);
+                String location = cleanField(fields[1]);
+                if (barcode.isBlank()) {
+                    failures.add(lineNumber + "행(바코드 없음)");
+                    continue;
+                }
+                rows.put(barcode, location);
+            }
+        }
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("처리할 CSV 데이터가 없습니다.");
+        }
+        return rows;
+    }
+
+    private Map<String, Product> loadProductsByBarcode(List<String> barcodes) {
+        Map<String, Product> products = new HashMap<>();
+        List<String> normalized = barcodes.stream().map(this::normalize).distinct().toList();
+        for (int i = 0; i < normalized.size(); i += BATCH_SIZE) {
+            int end = Math.min(i + BATCH_SIZE, normalized.size());
+            for (Product product : productRepository.findBySkuOrBarcodeInLowercase(normalized.subList(i, end))) {
+                if (product.getBarcode() != null) products.put(normalize(product.getBarcode()), product);
+                if (product.getBarcode2() != null) products.put(normalize(product.getBarcode2()), product);
+            }
+        }
+        return products;
+    }
+
+    private String readCsvContent(MultipartFile file) throws Exception {
+        byte[] bytes = file.getBytes();
+        String utf8 = new String(bytes, StandardCharsets.UTF_8);
+        if (!utf8.contains("\uFFFD")) return utf8.replace("\uFEFF", "");
+        return new String(bytes, Charset.forName("EUC-KR")).replace("\uFEFF", "");
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
     
     /**
